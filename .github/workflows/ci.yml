@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install linters
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Release safety
+        run: python tests/check_release.py
+      - name: Bootstrap smoke tests
+        run: python tests/test_bootstrap.py
+      - name: Shell syntax
+        run: |
+          bash -n install.sh
+          bash -n scripts/*.sh
+          shellcheck --severity=error install.sh scripts/*.sh
+      - name: Python syntax
+        run: |
+          python -m py_compile src/xray-qos src/qos-web/*.py tests/*.py
+      - name: JavaScript syntax
+        run: |
+          node --check src/qos-web/static/dashboard.js
+          node --check src/qos-web/static/login.js
+          node --check src/qos-web/static/xui-qos-integration.js

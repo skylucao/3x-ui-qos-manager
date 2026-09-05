@@ -1,0 +1,159 @@
+.xqos-launcher {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 2147482000;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 10px 16px 10px 11px;
+  border: 1px solid rgba(125, 211, 252, .5);
+  border-radius: 999px;
+  color: #f8fafc;
+  background: linear-gradient(135deg, #2563eb, #0891b2);
+  box-shadow: 0 14px 40px rgba(2, 8, 23, .32), inset 0 1px rgba(255, 255, 255, .2);
+  font: 700 15px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: .01em;
+  cursor: pointer;
+  transition: transform .16s ease, filter .16s ease, box-shadow .16s ease;
+}
+
+.xqos-launcher[hidden],
+.xqos-overlay[hidden] {
+  display: none !important;
+}
+
+.xqos-launcher:hover {
+  filter: brightness(1.08);
+  transform: translateY(-2px);
+  box-shadow: 0 18px 46px rgba(2, 8, 23, .38), inset 0 1px rgba(255, 255, 255, .2);
+}
+
+.xqos-launcher:focus-visible,
+.xqos-close:focus-visible {
+  outline: 3px solid rgba(56, 189, 248, .45);
+  outline-offset: 3px;
+}
+
+.xqos-launcher-icon {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  color: #0f172a;
+  background: #a7f3d0;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.xqos-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(2, 6, 23, .72);
+  backdrop-filter: blur(8px);
+}
+
+.xqos-window {
+  width: min(1480px, 96vw);
+  height: min(920px, 94vh);
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 18px;
+  background: #07101f;
+  box-shadow: 0 32px 100px rgba(0, 0, 0, .52);
+}
+
+.xqos-window-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 54px;
+  padding: 0 12px 0 18px;
+  color: #e2e8f0;
+  background: #0b1526;
+  border-bottom: 1px solid rgba(148, 163, 184, .18);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.xqos-window-head > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.xqos-window-head strong {
+  font-size: 15px;
+}
+
+.xqos-window-head small {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.xqos-live {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 12px rgba(52, 211, 153, .75);
+}
+
+.xqos-close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  color: #cbd5e1;
+  background: transparent;
+  font: 300 28px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.xqos-close:hover {
+  color: #fff;
+  background: rgba(148, 163, 184, .13);
+}
+
+.xqos-frame {
+  display: block;
+  width: 100%;
+  height: calc(100% - 54px);
+  border: 0;
+  background: #07101f;
+}
+
+@media (max-width: 680px) {
+  .xqos-launcher {
+    right: 14px;
+    bottom: 14px;
+  }
+
+  .xqos-overlay {
+    padding: 0;
+  }
+
+  .xqos-window {
+    width: 100vw;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .xqos-window-head small {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xqos-launcher {
+    transition: none;
+  }
+}

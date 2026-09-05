@@ -1,0 +1,42 @@
+[Unit]
+Description=Privileged controller for the Xray QoS web dashboard
+After=network.target xray-qos.service
+Wants=xray-qos.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+RuntimeDirectory=xray-qos-web
+RuntimeDirectoryMode=0750
+Environment=QOS_WEB_USER=xray-qos-web
+Environment=QOS_CONTROL_SOCKET=/run/xray-qos-web/control.sock
+ExecStart=/usr/bin/python3 /opt/xray-qos-web/control.py
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=180s
+UMask=0077
+
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=full
+ReadWritePaths=/etc/xray-qos
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ProtectClock=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+IPAddressDeny=any
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_MODULE CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_MODULE CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
+ReadOnlyPaths=/opt/xray-qos-web /usr/local/sbin/xray-qos /etc/x-ui
+TasksMax=32
+MemoryMax=96M
+
+[Install]
+WantedBy=multi-user.target

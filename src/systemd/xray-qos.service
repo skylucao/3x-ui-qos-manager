@@ -1,0 +1,16 @@
+[Unit]
+Description=Per-node bandwidth limits for 3x-ui/Xray
+Wants=network-online.target
+After=network-online.target
+Before=x-ui.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/xray-qos apply
+ExecReload=/usr/local/sbin/xray-qos reload
+ExecStop=/usr/local/sbin/xray-qos remove
+ExecStopPost=-/usr/local/sbin/xray-qos cleanup
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="csrf-token" content="__CSRF_TOKEN__">
+  <title>节点速度管理</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="dashboard.js" defer></script>
+</head>
+<body class="__BODY_CLASS__">
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">XRAY QOS</p>
+        <h1>节点速度管理</h1>
+        <p class="subtitle">自动同步 3x-ui 节点，逐个控制上下行速度</p>
+      </div>
+      <div class="header-actions">
+        <span id="health" class="pill waiting"><i></i><span>正在连接</span></span>
+        <a class="ghost-button" href="__PANEL_URL__" target="_blank" rel="noopener">3x-ui</a>
+        <button id="logout" class="ghost-button" type="button">退出</button>
+      </div>
+    </header>
+
+    <section class="pool" aria-label="带宽池">
+      <div class="pool-label">
+        <span>当前总下载</span>
+        <strong><span id="pool-used">--</span> / <span id="pool-total">--</span> Mbps</strong>
+      </div>
+      <div class="pool-track" aria-hidden="true"><span id="pool-fill"></span></div>
+      <div class="pool-values">
+        <span>可用余量 <strong id="pool-free">--</strong> Mbps</span>
+        <span>当前总上传 <strong id="pool-upload">--</strong> Mbps</span>
+        <span>管理预留 <strong id="pool-reserved">--</strong> Mbps</span>
+        <span>节点 <strong id="node-count">--</strong> 个</span>
+      </div>
+    </section>
+
+    <section id="cards" class="grid" aria-label="节点状态"></section>
+    <div id="empty-state" class="empty-state" hidden>3x-ui 暂无本机节点；新增后将在数秒内自动显示。</div>
+
+    <p class="footnote">新节点默认未限速；启用后只限制该入站端口。实时速度来自 Linux QoS 或 3x-ui 计数，可能包含少量协议开销。</p>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="node-announcer" class="sr-only" aria-live="polite"></div>
+
+  <template id="card-template">
+    <article class="card">
+      <div class="card-head">
+        <div>
+          <div class="node-title"><i class="node-dot"></i><h2></h2></div>
+          <span class="node-port"></span>
+        </div>
+        <span class="pill node-health"><i></i><span>检查中</span></span>
+      </div>
+
+      <div class="metrics">
+        <div class="metric metric-down">
+          <span>实时下载</span>
+          <strong data-value="down-rate">--</strong>
+          <small>上限 <b data-value="down-limit">--</b><span data-unit="down"> Mbps</span></small>
+        </div>
+        <div class="metric metric-up">
+          <span>实时上传</span>
+          <strong data-value="up-rate">--</strong>
+          <small>上限 <b data-value="up-limit">--</b><span data-unit="up"> Mbps</span></small>
+        </div>
+        <div class="metric">
+          <span>累计下载</span>
+          <strong data-value="down-total">--</strong>
+          <small><b data-value="down-drops">--</b> 丢包</small>
+        </div>
+        <div class="metric">
+          <span>累计上传</span>
+          <strong data-value="up-total">--</strong>
+          <small><b data-value="up-drops">--</b> 丢包</small>
+        </div>
+      </div>
+
+      <div class="chart-wrap">
+        <canvas class="chart" aria-label="最近两分钟速度曲线"></canvas>
+        <div class="chart-legend">
+          <span class="down"><i></i>下载</span>
+          <span class="up"><i></i>上传</span>
+          <span class="chart-window">最近 2 分钟</span>
+        </div>
+      </div>
+
+      <div class="controls">
+        <label class="limit-toggle">
+          <input type="checkbox" data-input="limit-enabled">
+          <span class="toggle-track" aria-hidden="true"><i></i></span>
+          <span><strong>启用此节点限速</strong><small>关闭时共享线路可用带宽</small></span>
+        </label>
+
+        <div class="control">
+          <div class="control-head">
+            <label data-label="down">下载上限</label>
+            <span class="number-wrap"><input type="number" min="1" step="1" data-input="down" inputmode="numeric"> Mbps</span>
+          </div>
+          <input type="range" min="1" step="1" data-range="down" aria-label="下载上限">
+        </div>
+
+        <div class="control">
+          <div class="control-head">
+            <label data-label="up">上传上限</label>
+            <span class="number-wrap"><input type="number" min="1" step="1" data-input="up" inputmode="numeric"> Mbps</span>
+          </div>
+          <input type="range" min="1" step="1" data-range="up" class="up-range" aria-label="上传上限">
+        </div>
+      </div>
+
+      <div class="card-footer">
+        <span class="change-state">没有未保存的修改</span>
+        <button class="apply-button" type="button" disabled>应用此节点</button>
+      </div>
+    </article>
+  </template>
+</body>
+</html>

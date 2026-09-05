@@ -1,0 +1,1099 @@
+#!/usr/bin/env python3
+"""Dynamic per-inbound traffic shaping for local 3x-ui/Xray inbounds.
+
+The 3x-ui database is the source of inbound identity and ports. A separate,
+root-owned JSON file stores only optional per-inbound caps. Unconfigured nodes
+remain on the default path and are never silently limited.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import hashlib
+import ipaddress
+import json
+import os
+import re
+import shlex
+import signal
+import sqlite3
+import stat
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+CONFIG_PATH = Path(os.environ.get("XRAY_QOS_CONFIG", "/etc/default/xray-qos"))
+STATE_PATH = Path(os.environ.get("XRAY_QOS_STATE", "/run/xray-qos/state.json"))
+LOCK_PATH = Path(os.environ.get("XRAY_QOS_LOCK", "/run/lock/xray-qos.lock"))
+TC = os.environ.get("XRAY_QOS_TC", "/usr/sbin/tc")
+IP = os.environ.get("XRAY_QOS_IP", "/usr/sbin/ip")
+MODPROBE = os.environ.get("XRAY_QOS_MODPROBE", "/usr/sbin/modprobe")
+COMMAND_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"}
+RATE_RE = re.compile(r"^(\d+(?:\.\d+)?)(kbit|mbit|gbit)$")
+IFACE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,15}$")
+# Bounding the number of actively shaped nodes also bounds transaction and
+# rollback time. Every 3x-ui inbound is still discovered and shown; only this
+# many may have a limit enabled at once.
+MAX_MANAGED_NODES = 32
+STATE_VERSION = 2
+PROFILE_VERSION = 1
+
+
+class QosError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class Config:
+    wan: str
+    link_kbit: int
+    reserved_kbit: int
+    management_ports: frozenset[int]
+    xui_db: Path
+    profiles: Path
+
+
+@dataclass(frozen=True)
+class Inbound:
+    inbound_id: int
+    port: int
+    enabled: bool
+    listen: str
+    sort_index: int
+
+
+def fail(message: str) -> None:
+    raise QosError(message)
+
+
+def parse_rate(value: str) -> int:
+    if len(value) > 64:
+        fail(f"invalid rate: {value[:64]}...")
+    match = RATE_RE.fullmatch(value)
+    if not match:
+        fail(f"invalid rate: {value}")
+    multiplier = {"kbit": 1, "mbit": 1000, "gbit": 1_000_000}[match.group(2)]
+    kbit = int(round(float(match.group(1)) * multiplier))
+    if not 1_000 <= kbit <= 100_000_000:
+        fail(f"rate out of supported range: {value}")
+    return kbit
+
+
+def rate_text(kbit: int) -> str:
+    return f"{kbit}kbit"
+
+
+def trusted_regular_file(path: Path, *, may_be_missing: bool = False) -> None:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        if may_be_missing:
+            return
+        fail(f"missing {path}")
+    if not stat.S_ISREG(info.st_mode) or path.is_symlink():
+        fail(f"{path} must be a regular file")
+    if getattr(os, "geteuid", lambda: 1)() == 0:
+        if info.st_uid != 0 or info.st_mode & 0o022:
+            fail(f"{path} must be root-owned and not writable by group or others")
+
+
+def parse_config_file(path: Path) -> dict[str, str]:
+    trusted_regular_file(path)
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        try:
+            parts = shlex.split(raw_value.strip(), comments=False, posix=True)
+        except ValueError as exc:
+            fail(f"invalid value for {key}: {exc}")
+        if len(parts) != 1:
+            fail(f"invalid value for {key}")
+        values[key] = parts[0]
+    return values
+
+
+def load_config() -> Config:
+    values = parse_config_file(CONFIG_PATH)
+    required = {"WAN", "LINK_EGRESS", "DEFAULT_RATE"}
+    missing = required - values.keys()
+    if missing:
+        fail(f"missing configuration keys: {', '.join(sorted(missing))}")
+    wan = values["WAN"]
+    if not IFACE_RE.fullmatch(wan):
+        fail("invalid WAN interface")
+    link = parse_rate(values["LINK_EGRESS"])
+    reserved = parse_rate(values["DEFAULT_RATE"])
+    if reserved >= link:
+        fail("DEFAULT_RATE must be lower than LINK_EGRESS")
+    management_ports: set[int] = set()
+    for token in values.get("MGMT_PORTS", "").split():
+        if not token.isdigit() or not 1 <= int(token) <= 65535:
+            fail(f"invalid management port: {token}")
+        management_ports.add(int(token))
+    xui_db = Path(values.get("XRAY_DB", "/etc/x-ui/x-ui.db"))
+    profiles = Path(values.get("QOS_PROFILES", "/etc/xray-qos/nodes.json"))
+    if not xui_db.is_absolute() or not profiles.is_absolute():
+        fail("XRAY_DB and QOS_PROFILES must be absolute paths")
+    trusted_regular_file(xui_db)
+    trusted_regular_file(profiles, may_be_missing=True)
+    return Config(wan, link, reserved, frozenset(management_ports), xui_db, profiles)
+
+
+def read_profiles(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"version": PROFILE_VERSION, "revision": 0, "nodes": {}}
+    trusted_regular_file(path)
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(f"invalid profiles file: {exc}")
+    if not isinstance(document, dict) or set(document) != {"version", "revision", "nodes"}:
+        fail("invalid profiles document")
+    if document["version"] != PROFILE_VERSION:
+        fail("unsupported profiles version")
+    revision = document["revision"]
+    nodes = document["nodes"]
+    if type(revision) is not int or revision < 0 or not isinstance(nodes, dict):
+        fail("invalid profiles document")
+    normalized: dict[str, dict[str, int]] = {}
+    for raw_id, profile in nodes.items():
+        if not isinstance(raw_id, str) or not raw_id.isdigit() or int(raw_id) <= 0:
+            fail("invalid inbound id in profiles")
+        if not isinstance(profile, dict) or set(profile) != {"download_mbps", "upload_mbps"}:
+            fail(f"invalid profile for inbound {raw_id}")
+        down = profile["download_mbps"]
+        up = profile["upload_mbps"]
+        if type(down) is not int or type(up) is not int or down < 1 or up < 1:
+            fail(f"invalid profile rates for inbound {raw_id}")
+        normalized[str(int(raw_id))] = {"download_mbps": down, "upload_mbps": up}
+    return {"version": PROFILE_VERSION, "revision": revision, "nodes": normalized}
+
+
+def atomic_json_write(path: Path, document: dict[str, Any]) -> None:
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.parent.is_symlink():
+        fail(f"{path.parent} must not be a symlink")
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(document, handle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_DIRECTORY | os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def discover_inbounds(database: Path) -> list[Inbound]:
+    uri = database.as_uri() + "?mode=ro"
+    try:
+        connection = sqlite3.connect(uri, uri=True, timeout=2.0)
+        connection.execute("PRAGMA query_only=ON")
+        connection.execute("PRAGMA busy_timeout=1500")
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(inbounds)")}
+        required = {"id", "port", "enable", "node_id"}
+        if not required.issubset(columns):
+            fail("3x-ui inbounds schema is not supported")
+        sort_expression = "COALESCE(sub_sort_index, 0)" if "sub_sort_index" in columns else "0"
+        rows = connection.execute(
+            f"SELECT id, port, enable, listen, {sort_expression} FROM inbounds "
+            "WHERE node_id IS NULL ORDER BY 5, id"
+        ).fetchall()
+    except sqlite3.Error as exc:
+        fail(f"cannot read 3x-ui database: {exc}")
+    finally:
+        if "connection" in locals():
+            connection.close()
+    inbounds: list[Inbound] = []
+    for raw_id, raw_port, raw_enable, raw_listen, raw_sort in rows:
+        if type(raw_id) is not int or raw_id <= 0:
+            continue
+        try:
+            port = int(raw_port)
+            sort_index = int(raw_sort or 0)
+        except (TypeError, ValueError):
+            continue
+        if not 1 <= port <= 65535:
+            continue
+        inbounds.append(Inbound(raw_id, port, bool(raw_enable), str(raw_listen or "").strip()[:128], sort_index))
+    return inbounds
+
+
+def listen_supported(value: str) -> bool:
+    if value in {"", "*", "0.0.0.0", "::", "[::]"}:
+        return True
+    if value.lower() == "localhost":
+        return False
+    try:
+        return not ipaddress.ip_address(value.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def eligible_inbounds(inbounds: list[Inbound], config: Config) -> list[Inbound]:
+    counts: dict[int, int] = {}
+    for inbound in inbounds:
+        if inbound.enabled:
+            counts[inbound.port] = counts.get(inbound.port, 0) + 1
+    eligible = [
+        inbound
+        for inbound in inbounds
+        if inbound.enabled
+        and inbound.port not in config.management_ports
+        and counts.get(inbound.port) == 1
+        and listen_supported(inbound.listen)
+    ]
+    return eligible
+
+
+def ifb_name(inbound_id: int) -> str:
+    token = format(inbound_id, "x")
+    if len(token) > 10:
+        token = hashlib.sha256(str(inbound_id).encode("ascii")).hexdigest()[:10]
+    return f"ifbq{token}"
+
+
+def build_plan(config: Config, profiles: dict[str, Any], inbounds: list[Inbound]) -> dict[str, Any]:
+    nodes: list[dict[str, Any]] = []
+    used_ifbs: set[str] = set()
+    for inbound in eligible_inbounds(inbounds, config):
+        key = str(inbound.inbound_id)
+        profile = profiles["nodes"].get(key)
+        if profile is None:
+            continue
+        if len(nodes) >= MAX_MANAGED_NODES:
+            fail(f"too many active limits (maximum {MAX_MANAGED_NODES})")
+        down_kbit = profile["download_mbps"] * 1000
+        up_kbit = profile["upload_mbps"] * 1000
+        if down_kbit > config.link_kbit or up_kbit > config.link_kbit:
+            fail(f"inbound {key} limit exceeds LINK_EGRESS")
+        ifb = ifb_name(inbound.inbound_id)
+        if ifb in used_ifbs:
+            fail("IFB name collision")
+        used_ifbs.add(ifb)
+        index = len(nodes)
+        slot = 10 + index
+        nodes.append(
+            {
+                "id": inbound.inbound_id,
+                "port": inbound.port,
+                "slot": slot,
+                "leaf": 110 + index,
+                "ifb": ifb,
+                "down_kbit": down_kbit,
+                "up_kbit": up_kbit,
+                "egress_prefs": [30000 + index * 8 + offset for offset in range(4)],
+                "ingress_prefs": [40000 + index * 8 + offset for offset in range(4)],
+            }
+        )
+    signature_source = {
+        "wan": config.wan,
+        "link_kbit": config.link_kbit,
+        "reserved_kbit": config.reserved_kbit,
+        "nodes": nodes,
+    }
+    signature = hashlib.sha256(
+        json.dumps(signature_source, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        "version": STATE_VERSION,
+        "owned": True,
+        "wan": config.wan,
+        "link_kbit": config.link_kbit,
+        "reserved_kbit": config.reserved_kbit,
+        "signature": signature,
+        "nodes": nodes,
+    }
+
+
+def read_state() -> dict[str, Any] | None:
+    try:
+        document = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(f"invalid runtime state: {exc}")
+    if not isinstance(document, dict) or document.get("version") != STATE_VERSION or document.get("owned") is not True:
+        fail("runtime state is not owned by this xray-qos version")
+    if not IFACE_RE.fullmatch(str(document.get("wan", ""))) or not isinstance(document.get("nodes"), list):
+        fail("invalid runtime state")
+    return document
+
+
+def run(command: list[str], *, check: bool = True, timeout: float = 12.0) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        check=False,
+        shell=False,
+        cwd="/",
+        env=COMMAND_ENV,
+    )
+    if check and completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()[-600:]
+        fail(f"command failed ({' '.join(command[:4])}): {detail or completed.returncode}")
+    return completed
+
+
+def device_exists(device: str) -> bool:
+    return run([IP, "link", "show", "dev", device], check=False).returncode == 0
+
+
+def is_ifb(device: str) -> bool:
+    result = run([IP, "-details", "link", "show", "dev", device], check=False)
+    return result.returncode == 0 and re.search(r"\bifb\b", result.stdout) is not None
+
+
+def is_link_up(device: str) -> bool:
+    result = run([IP, "-j", "link", "show", "dev", device], check=False)
+    if result.returncode != 0:
+        return False
+    try:
+        items = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+    return bool(
+        isinstance(items, list)
+        and items
+        and isinstance(items[0], dict)
+        and isinstance(items[0].get("flags"), list)
+        and "UP" in items[0]["flags"]
+    )
+
+
+def qdiscs(device: str) -> str:
+    return run([TC, "qdisc", "show", "dev", device], check=False).stdout
+
+
+def has_clsact(device: str) -> bool:
+    return re.search(r"^qdisc clsact ffff:", qdiscs(device), re.MULTILINE) is not None
+
+
+def has_legacy_ingress(device: str) -> bool:
+    return re.search(r"^qdisc ingress ffff:", qdiscs(device), re.MULTILINE) is not None
+
+
+def has_owned_root(device: str) -> bool:
+    return re.search(r"^qdisc htb 1: root", qdiscs(device), re.MULTILINE) is not None
+
+
+def delete_filter(wan: str, protocol: str, preference: int) -> None:
+    run(
+        [TC, "filter", "del", "dev", wan, "ingress", "protocol", protocol, "pref", str(preference)],
+        check=False,
+    )
+
+
+def cleanup_plan(plan: dict[str, Any], *, restore_fq: bool, strict: bool) -> list[str]:
+    errors: list[str] = []
+    wan = str(plan.get("wan", ""))
+    if IFACE_RE.fullmatch(wan) and device_exists(wan):
+        for node in plan.get("nodes", []):
+            for offset, preference in enumerate(node.get("ingress_prefs", [])):
+                delete_filter(wan, "ip" if offset < 2 else "ipv6", int(preference))
+        root_text = qdiscs(wan)
+        owned_root = re.search(r"^qdisc htb 1: root", root_text, re.MULTILINE) is not None
+        safe_root = not any(
+            not re.match(r"^qdisc (?:fq|noqueue) ", line)
+            for line in root_text.splitlines()
+            if " root " in f" {line} "
+        )
+        if owned_root:
+            result = run([TC, "qdisc", "del", "dev", wan, "root"], check=False)
+            if result.returncode != 0:
+                errors.append("could not remove owned WAN root qdisc")
+        elif not safe_root:
+            errors.append("WAN root qdisc is no longer owned by xray-qos")
+        if restore_fq and (owned_root or safe_root):
+            result = run([TC, "qdisc", "replace", "dev", wan, "root", "fq"], check=False)
+            if result.returncode != 0:
+                errors.append("could not restore WAN fq qdisc")
+    for node in plan.get("nodes", []):
+        device = str(node.get("ifb", ""))
+        if not IFACE_RE.fullmatch(device) or not device_exists(device):
+            continue
+        if not is_ifb(device):
+            errors.append(f"{device} exists but is not an IFB")
+            continue
+        run([TC, "qdisc", "del", "dev", device, "root"], check=False)
+        run([IP, "link", "set", "dev", device, "down"], check=False)
+        result = run([IP, "link", "delete", device, "type", "ifb"], check=False)
+        if result.returncode != 0:
+            errors.append(f"could not delete {device}")
+    if IFACE_RE.fullmatch(wan) and device_exists(wan):
+        remaining_filters = run([TC, "filter", "show", "dev", wan, "ingress"], check=False).stdout
+        for node in plan.get("nodes", []):
+            for preference in node.get("ingress_prefs", []):
+                if re.search(rf"\bpref {int(preference)}\b", remaining_filters):
+                    errors.append(f"ingress filter {preference} remains installed")
+    if strict and errors:
+        fail("; ".join(errors))
+    return errors
+
+
+def preflight(plan: dict[str, Any], old_state: dict[str, Any] | None) -> None:
+    wan = plan["wan"]
+    if not device_exists(wan):
+        fail(f"interface {wan} does not exist")
+    old_ifbs = {str(node.get("ifb")) for node in (old_state or {}).get("nodes", [])}
+    old_prefs = {
+        int(preference)
+        for node in (old_state or {}).get("nodes", [])
+        for preference in node.get("ingress_prefs", [])
+    }
+    if old_state is not None and old_state.get("wan") != wan:
+        fail("WAN changed while QoS is active; remove limits before changing WAN")
+    if has_legacy_ingress(wan) and not has_clsact(wan):
+        fail("legacy ingress qdisc is present; replace it with clsact before enabling xray-qos")
+    root_text = qdiscs(wan)
+    if old_state is None:
+        root_lines = [line for line in root_text.splitlines() if " root " in f" {line} "]
+        if any(not re.match(r"^qdisc (?:fq|noqueue) ", line) for line in root_lines):
+            fail("refusing to replace an unowned WAN root qdisc")
+        if has_owned_root(wan):
+            fail("htb 1: exists without xray-qos runtime state")
+    for node in plan["nodes"]:
+        device = node["ifb"]
+        if device_exists(device) and device not in old_ifbs:
+            fail(f"{device} exists without xray-qos ownership")
+    filter_text = run([TC, "filter", "show", "dev", wan, "ingress"], check=False).stdout
+    for node in plan["nodes"]:
+        for preference in node["ingress_prefs"]:
+            if preference not in old_prefs and re.search(rf"\bpref {preference}\b", filter_text):
+                fail(f"ingress filter preference {preference} is already in use")
+
+
+def add_port_filters(
+    device: str,
+    parent_handle: str,
+    port_field: str,
+    port: int,
+    classid: str,
+    preferences: list[int],
+) -> None:
+    specifications = (("ip", "tcp"), ("ip", "udp"), ("ipv6", "tcp"), ("ipv6", "udp"))
+    for preference, (protocol, transport) in zip(preferences, specifications, strict=True):
+        run(
+            [
+                TC,
+                "filter",
+                "add",
+                "dev",
+                device,
+                "parent",
+                parent_handle,
+                "protocol",
+                protocol,
+                "pref",
+                str(preference),
+                "flower",
+                "ip_proto",
+                transport,
+                port_field,
+                str(port),
+                "classid",
+                classid,
+            ]
+        )
+
+
+def add_ingress_redirects(wan: str, node: dict[str, Any]) -> None:
+    specifications = (("ip", "tcp"), ("ip", "udp"), ("ipv6", "tcp"), ("ipv6", "udp"))
+    for preference, (protocol, transport) in zip(node["ingress_prefs"], specifications, strict=True):
+        run(
+            [
+                TC,
+                "filter",
+                "add",
+                "dev",
+                wan,
+                "ingress",
+                "protocol",
+                protocol,
+                "pref",
+                str(preference),
+                "flower",
+                "ip_proto",
+                transport,
+                "dst_port",
+                str(node["port"]),
+                "action",
+                "mirred",
+                "egress",
+                "redirect",
+                "dev",
+                node["ifb"],
+            ]
+        )
+
+
+def apply_plan(plan: dict[str, Any]) -> None:
+    wan = plan["wan"]
+    if not plan["nodes"]:
+        run([TC, "qdisc", "replace", "dev", wan, "root", "fq"])
+        return
+    link = rate_text(int(plan["link_kbit"]))
+    reserved = rate_text(int(plan["reserved_kbit"]))
+    run([MODPROBE, "ifb"])
+    run([TC, "qdisc", "del", "dev", wan, "root"], check=False)
+    run([TC, "qdisc", "add", "dev", wan, "root", "handle", "1:", "htb", "default", "999"])
+    run([TC, "class", "add", "dev", wan, "parent", "1:", "classid", "1:1", "htb", "rate", link, "ceil", link])
+    run(
+        [
+            TC,
+            "class",
+            "add",
+            "dev",
+            wan,
+            "parent",
+            "1:1",
+            "classid",
+            "1:999",
+            "htb",
+            "rate",
+            reserved,
+            "ceil",
+            link,
+            "prio",
+            "0",
+            "quantum",
+            "1514",
+        ]
+    )
+    run([TC, "qdisc", "add", "dev", wan, "parent", "1:999", "handle", "999:", "fq"])
+
+    for node in plan["nodes"]:
+        classid = f"1:{node['slot']}"
+        down = rate_text(int(node["down_kbit"]))
+        run(
+            [
+                TC,
+                "class",
+                "add",
+                "dev",
+                wan,
+                "parent",
+                "1:1",
+                "classid",
+                classid,
+                "htb",
+                "rate",
+                "8kbit",
+                "ceil",
+                down,
+                "prio",
+                "1",
+                "quantum",
+                "1514",
+            ]
+        )
+        run([TC, "qdisc", "add", "dev", wan, "parent", classid, "handle", f"{node['leaf']}:", "fq"])
+        add_port_filters(wan, "1:", "src_port", int(node["port"]), classid, node["egress_prefs"])
+
+        device = node["ifb"]
+        run([IP, "link", "add", device, "type", "ifb"])
+        run([IP, "link", "set", "dev", device, "up"])
+        up = rate_text(int(node["up_kbit"]))
+        run([TC, "qdisc", "add", "dev", device, "root", "handle", "2:", "htb", "default", "1"])
+        run(
+            [
+                TC,
+                "class",
+                "add",
+                "dev",
+                device,
+                "parent",
+                "2:",
+                "classid",
+                "2:1",
+                "htb",
+                "rate",
+                up,
+                "ceil",
+                up,
+                "quantum",
+                "1514",
+            ]
+        )
+        run([TC, "qdisc", "add", "dev", device, "parent", "2:1", "handle", "10:", "fq_codel"])
+
+    if not has_clsact(wan):
+        run([TC, "qdisc", "add", "dev", wan, "clsact"])
+    for node in plan["nodes"]:
+        add_ingress_redirects(wan, node)
+    verify_plan(plan)
+
+
+def verify_plan(plan: dict[str, Any]) -> None:
+    wan = plan["wan"]
+
+    def load_tc_json(arguments: list[str], label: str) -> list[dict[str, Any]]:
+        try:
+            value = json.loads(run([TC, "-j", *arguments]).stdout)
+        except json.JSONDecodeError as exc:
+            fail(f"cannot verify {label}: {exc}")
+        if not isinstance(value, list):
+            fail(f"cannot verify {label}")
+        return [item for item in value if isinstance(item, dict)]
+
+    def has_qdisc(
+        qdisc_items: list[dict[str, Any]],
+        *,
+        kind: str,
+        handle: str | None = None,
+        parent: str | None = None,
+        root: bool = False,
+        default_minor: int | None = None,
+    ) -> bool:
+        for item in qdisc_items:
+            if item.get("kind") != kind:
+                continue
+            if handle is not None and str(item.get("handle")) != handle:
+                continue
+            if parent is not None and str(item.get("parent")) != parent:
+                continue
+            if root and item.get("root") is not True:
+                continue
+            if default_minor is not None:
+                options = item.get("options")
+                if not isinstance(options, dict):
+                    continue
+                raw_default = options.get("default")
+                try:
+                    parsed_default = (
+                        int(raw_default, 16)
+                        if isinstance(raw_default, str) and raw_default.lower().startswith("0x")
+                        else int(raw_default)
+                    )
+                except (TypeError, ValueError):
+                    continue
+                if parsed_default != default_minor:
+                    continue
+            return True
+        return False
+
+    wan_qdiscs = load_tc_json(["qdisc", "show", "dev", wan], "WAN qdiscs")
+    if not plan["nodes"]:
+        if not has_qdisc(wan_qdiscs, kind="fq", root=True):
+            fail("WAN root verification failed")
+        return
+    if not has_qdisc(wan_qdiscs, kind="htb", handle="1:", root=True, default_minor=0x999):
+        fail("WAN root HTB verification failed")
+    if not has_qdisc(wan_qdiscs, kind="clsact", handle="ffff:"):
+        fail("WAN clsact verification failed")
+    if not has_qdisc(wan_qdiscs, kind="fq", handle="999:", parent="1:999"):
+        fail("WAN default leaf qdisc verification failed")
+    for node in plan["nodes"]:
+        if not has_qdisc(
+            wan_qdiscs,
+            kind="fq",
+            handle=f"{node['leaf']}:",
+            parent=f"1:{node['slot']}",
+        ):
+            fail(f"WAN leaf qdisc verification failed for inbound {node['id']}")
+
+    classes = load_tc_json(["class", "show", "dev", wan], "WAN classes")
+    by_handle = {str(item.get("classid") or item.get("handle")): item for item in classes}
+    expected_rates = {
+        "1:1": (int(plan["link_kbit"]) * 125, int(plan["link_kbit"]) * 125),
+        "1:999": (int(plan["reserved_kbit"]) * 125, int(plan["link_kbit"]) * 125),
+        **{f"1:{node['slot']}": (1000, int(node["down_kbit"]) * 125) for node in plan["nodes"]},
+    }
+    for handle, (rate, ceiling) in expected_rates.items():
+        item = by_handle.get(handle)
+        expected_parent = "1:" if handle == "1:1" else "1:1"
+        parent_matches = item is not None and (
+            str(item.get("parent")) == expected_parent
+            or (handle == "1:1" and item.get("root") is True)
+        )
+        if (
+            item is None
+            or not parent_matches
+            or int(item.get("rate", -1)) != rate
+            or int(item.get("ceil", -1)) != ceiling
+        ):
+            fail(f"WAN class verification failed for {handle}")
+
+    ingress_filters = load_tc_json(["filter", "show", "dev", wan, "ingress"], "ingress filters")
+    egress_filters = load_tc_json(["filter", "show", "dev", wan, "parent", "1:"], "egress filters")
+
+    def matching_filter(
+        filters: list[dict[str, Any]],
+        preference: int,
+        protocol: str,
+        transport: str,
+        port_field: str,
+        port: int,
+        *,
+        classid: str | None = None,
+        redirect: str | None = None,
+    ) -> bool:
+        for item in filters:
+            if item.get("pref") != preference or item.get("protocol") != protocol or item.get("kind") != "flower":
+                continue
+            options = item.get("options")
+            if not isinstance(options, dict):
+                continue
+            keys = options.get("keys")
+            if not isinstance(keys, dict) or keys.get("ip_proto") != transport or keys.get(port_field) != port:
+                continue
+            if classid is not None and options.get("classid") != classid:
+                continue
+            if redirect is not None:
+                actions = options.get("actions")
+                if not isinstance(actions, list) or not any(
+                    isinstance(action, dict)
+                    and action.get("kind") == "mirred"
+                    and action.get("mirred_action") == "redirect"
+                    and action.get("direction") == "egress"
+                    and action.get("to_dev") == redirect
+                    for action in actions
+                ):
+                    continue
+            return True
+        return False
+
+    specifications = (("ip", "tcp"), ("ip", "udp"), ("ipv6", "tcp"), ("ipv6", "udp"))
+    for node in plan["nodes"]:
+        for offset, (protocol, transport) in enumerate(specifications):
+            if not matching_filter(
+                egress_filters,
+                node["egress_prefs"][offset],
+                protocol,
+                transport,
+                "src_port",
+                int(node["port"]),
+                classid=f"1:{node['slot']}",
+            ):
+                fail(f"egress filter verification failed for inbound {node['id']}")
+            if not matching_filter(
+                ingress_filters,
+                node["ingress_prefs"][offset],
+                protocol,
+                transport,
+                "dst_port",
+                int(node["port"]),
+                redirect=node["ifb"],
+            ):
+                fail(f"ingress filter verification failed for inbound {node['id']}")
+        if not is_ifb(node["ifb"]) or not is_link_up(node["ifb"]):
+            fail(f"IFB verification failed for inbound {node['id']}")
+        ifb_classes = load_tc_json(["class", "show", "dev", node["ifb"]], f"{node['ifb']} classes")
+        ifb_class = next(
+            (item for item in ifb_classes if str(item.get("classid") or item.get("handle")) == "2:1"),
+            None,
+        )
+        expected_up = int(node["up_kbit"]) * 125
+        if (
+            ifb_class is None
+            or not (str(ifb_class.get("parent")) == "2:" or ifb_class.get("root") is True)
+            or int(ifb_class.get("rate", -1)) != expected_up
+            or int(ifb_class.get("ceil", -1)) != expected_up
+        ):
+            fail(f"IFB class verification failed for inbound {node['id']}")
+        ifb_qdiscs = load_tc_json(["qdisc", "show", "dev", node["ifb"]], f"{node['ifb']} qdiscs")
+        if not has_qdisc(ifb_qdiscs, kind="htb", handle="2:", root=True, default_minor=1):
+            fail(f"IFB root qdisc verification failed for inbound {node['id']}")
+        if not has_qdisc(ifb_qdiscs, kind="fq_codel", handle="10:", parent="2:1"):
+            fail(f"IFB leaf qdisc verification failed for inbound {node['id']}")
+
+
+def write_state(plan: dict[str, Any]) -> None:
+    STATE_PATH.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    atomic_json_write(STATE_PATH, plan)
+
+
+def remove_state_file() -> None:
+    try:
+        STATE_PATH.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def install_signal_handlers() -> None:
+    def interrupted(_signum: int, _frame: Any) -> None:
+        raise InterruptedError("operation interrupted")
+
+    signal.signal(signal.SIGINT, interrupted)
+    signal.signal(signal.SIGTERM, interrupted)
+
+
+def apply_transaction(plan: dict[str, Any], *, force: bool = False) -> bool:
+    old_state = read_state()
+    if not force and old_state is not None and old_state.get("signature") == plan["signature"]:
+        try:
+            verify_plan(plan)
+            return False
+        except QosError:
+            force = True
+    preflight(plan, old_state)
+    try:
+        if old_state is not None:
+            cleanup_plan(old_state, restore_fq=True, strict=True)
+        apply_plan(plan)
+        write_state(plan)
+        return True
+    except BaseException as original:
+        cleanup_errors = cleanup_plan(plan, restore_fq=True, strict=False)
+        if old_state is not None:
+            recovery_problem: BaseException | None = None
+            try:
+                old_cleanup_errors = cleanup_plan(old_state, restore_fq=True, strict=False)
+                if old_cleanup_errors:
+                    fail("; ".join(old_cleanup_errors))
+                apply_plan(old_state)
+            except BaseException as recovery:
+                recovery_problem = recovery
+            if recovery_problem is None and not cleanup_errors:
+                try:
+                    write_state(old_state)
+                except BaseException as recovery:
+                    recovery_problem = recovery
+                else:
+                    if isinstance(original, (KeyboardInterrupt, InterruptedError)):
+                        raise
+                    raise original
+
+            recovery_state = json.loads(json.dumps(old_state))
+            recovery_state["nodes"] = [
+                *recovery_state.get("nodes", []),
+                *json.loads(json.dumps(plan.get("nodes", []))),
+            ]
+            recovery_state["signature"] = "recovery-" + hashlib.sha256(
+                json.dumps(recovery_state["nodes"], sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            recovery_state["recovery_required"] = True
+            try:
+                write_state(recovery_state)
+            except BaseException as state_error:
+                detail = recovery_problem or "; ".join(cleanup_errors)
+                raise QosError(
+                    f"apply failed ({original}); recovery issue ({detail}); "
+                    f"could not preserve cleanup ownership ({state_error})"
+                ) from original
+            if recovery_problem is not None:
+                raise QosError(f"apply failed ({original}); recovery also failed ({recovery_problem})") from original
+            raise QosError(
+                f"apply failed ({original}); prior QoS was restored but residual resources require cleanup "
+                f"({'; '.join(cleanup_errors)})"
+            ) from original
+        elif cleanup_errors:
+            write_state(plan)
+        else:
+            remove_state_file()
+        if isinstance(original, (KeyboardInterrupt, InterruptedError)):
+            raise
+        raise
+
+
+def synchronize(*, force: bool = False) -> tuple[bool, dict[str, Any], dict[str, Any]]:
+    config = load_config()
+    profiles = read_profiles(config.profiles)
+    inbounds = discover_inbounds(config.xui_db)
+    plan = build_plan(config, profiles, inbounds)
+    changed = apply_transaction(plan, force=force)
+    return changed, plan, profiles
+
+
+def set_profile(
+    inbound_id: int,
+    enabled: bool,
+    down_mbps: int,
+    up_mbps: int,
+    expected_revision: int,
+) -> dict[str, Any]:
+    config = load_config()
+    profiles = read_profiles(config.profiles)
+    if profiles["revision"] != expected_revision:
+        fail("profile revision changed; refresh and try again")
+    inbounds = discover_inbounds(config.xui_db)
+    inbound_by_id = {item.inbound_id: item for item in inbounds}
+    if enabled and inbound_id not in inbound_by_id:
+        fail("inbound no longer exists")
+    if not enabled and inbound_id not in inbound_by_id and str(inbound_id) not in profiles["nodes"]:
+        fail("inbound and profile no longer exist")
+    old_profiles = json.loads(json.dumps(profiles))
+    profiles_existed = config.profiles.exists()
+    if enabled:
+        maximum = config.link_kbit // 1000
+        if not 1 <= down_mbps <= maximum or not 1 <= up_mbps <= maximum:
+            fail(f"limits must be between 1 and {maximum} Mbps")
+        active = inbound_by_id[inbound_id]
+        if active.port in config.management_ports:
+            fail("this inbound uses a protected management port")
+        if not listen_supported(active.listen):
+            fail("this inbound listen address is not supported")
+        if active.enabled:
+            conflicts = [item for item in inbounds if item.enabled and item.port == active.port]
+            if len(conflicts) != 1 or active.port in config.management_ports:
+                fail("this inbound cannot be limited independently because its port conflicts")
+        profiles["nodes"][str(inbound_id)] = {
+            "download_mbps": down_mbps,
+            "upload_mbps": up_mbps,
+        }
+    else:
+        profiles["nodes"].pop(str(inbound_id), None)
+    profiles["revision"] += 1
+    old_plan = build_plan(config, old_profiles, inbounds)
+    new_plan = build_plan(config, profiles, inbounds)
+    applied = False
+    try:
+        applied = apply_transaction(new_plan)
+        atomic_json_write(config.profiles, profiles)
+    except BaseException as original:
+        recovery_errors: list[str] = []
+        try:
+            if profiles_existed:
+                atomic_json_write(config.profiles, old_profiles)
+            else:
+                try:
+                    config.profiles.unlink()
+                except FileNotFoundError:
+                    pass
+                directory_fd = os.open(config.profiles.parent, os.O_DIRECTORY | os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+        except BaseException as recovery:
+            recovery_errors.append(f"profile recovery failed ({recovery})")
+        if applied:
+            try:
+                apply_transaction(old_plan, force=True)
+            except BaseException as recovery:
+                recovery_errors.append(f"QoS recovery failed ({recovery})")
+        if recovery_errors:
+            raise QosError(f"profile update failed ({original}); {'; '.join(recovery_errors)}") from original
+        raise
+    return profiles
+
+
+def show_status(as_json: bool) -> None:
+    config = load_config()
+    profiles = read_profiles(config.profiles)
+    inbounds = discover_inbounds(config.xui_db)
+    plan = build_plan(config, profiles, inbounds)
+    state = read_state()
+    document = {
+        "ok": True,
+        "revision": profiles["revision"],
+        "desired_signature": plan["signature"],
+        "applied_signature": state.get("signature") if state else None,
+        "inbounds": len(inbounds),
+        "managed": len(plan["nodes"]),
+    }
+    if as_json:
+        print(json.dumps(document, separators=(",", ":")))
+    else:
+        print(
+            f"local inbounds: {document['inbounds']}; active limits: {document['managed']}; "
+            f"profile revision: {document['revision']}"
+        )
+        print("topology: current" if document["desired_signature"] == document["applied_signature"] else "topology: sync required")
+
+
+def with_lock() -> Any:
+    LOCK_PATH.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    handle = LOCK_PATH.open("a+")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    except BaseException:
+        handle.close()
+        raise
+    return handle
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="xray-qos")
+    subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser("apply")
+    subparsers.add_parser("sync")
+    subparsers.add_parser("reload")
+    subparsers.add_parser("remove")
+    subparsers.add_parser("cleanup")
+    subparsers.add_parser("status")
+    subparsers.add_parser("status-json")
+    set_parser = subparsers.add_parser("set")
+    set_parser.add_argument("inbound_id", type=int)
+    set_parser.add_argument("mode", choices=("on", "off"))
+    set_parser.add_argument("download_mbps", type=int)
+    set_parser.add_argument("upload_mbps", type=int)
+    set_parser.add_argument("expected_revision", type=int)
+    arguments = parser.parse_args()
+    command = arguments.command or "status"
+    install_signal_handlers()
+    if command in {"status", "status-json"}:
+        show_status(command == "status-json")
+        return 0
+    lock = with_lock()
+    try:
+        if command in {"apply", "reload"}:
+            _changed, plan, _profiles = synchronize(force=True)
+            print(f"xray-qos: applied {len(plan['nodes'])} dynamic inbound limits")
+        elif command == "sync":
+            changed, plan, _profiles = synchronize(force=False)
+            print(
+                f"xray-qos: {'updated' if changed else 'already current'}; "
+                f"{len(plan['nodes'])} dynamic inbound limits"
+            )
+        elif command in {"remove", "cleanup"}:
+            state = read_state()
+            if state is not None:
+                errors = cleanup_plan(state, restore_fq=True, strict=False)
+                if errors:
+                    fail("; ".join(errors))
+                remove_state_file()
+            print("xray-qos: limits removed; WAN fq restored")
+        elif command == "set":
+            if arguments.inbound_id <= 0 or arguments.expected_revision < 0:
+                fail("invalid inbound id or revision")
+            profiles = set_profile(
+                arguments.inbound_id,
+                arguments.mode == "on",
+                arguments.download_mbps,
+                arguments.upload_mbps,
+                arguments.expected_revision,
+            )
+            print(json.dumps({"ok": True, "revision": profiles["revision"]}, separators=(",", ":")))
+        else:
+            parser.error("unknown command")
+    finally:
+        lock.close()
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except QosError as exc:
+        print(f"xray-qos: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    except subprocess.TimeoutExpired:
+        print("xray-qos: a network control command timed out", file=sys.stderr)
+        raise SystemExit(1)

@@ -1,0 +1,101 @@
+map $http_upgrade $xui_qos_connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+limit_req_zone $binary_remote_addr zone=xui_qos_general:10m rate=8r/s;
+limit_req_zone $binary_remote_addr zone=xui_qos_write:10m rate=12r/m;
+
+server {
+    listen @@PANEL_PORT@@@@LISTEN_SSL@@;
+    listen [::]:@@PANEL_PORT@@@@LISTEN_SSL@@;
+    server_name @@PUBLIC_HOST@@;
+    server_tokens off;
+
+@@TLS_BLOCK@@
+
+    access_log /var/log/nginx/xui-qos.access.log;
+    error_log /var/log/nginx/xui-qos.error.log warn;
+
+    client_max_body_size 128m;
+    client_body_timeout 60s;
+    client_header_timeout 15s;
+    keepalive_timeout 30s;
+    limit_req_status 429;
+
+    location = @@BASE_PATH@@xui-qos-integration.js {
+        alias /opt/xray-qos-web/static/xui-qos-integration.js;
+        default_type application/javascript;
+        add_header Cache-Control "no-store, max-age=0";
+    }
+
+    location = @@BASE_PATH@@xui-qos-integration.css {
+        alias /opt/xray-qos-web/static/xui-qos-integration.css;
+        default_type text/css;
+        add_header Cache-Control "no-store, max-age=0";
+    }
+
+    location = /_xui_qos_auth {
+        internal;
+        proxy_pass @@UPSTREAM_SCHEME@@://127.0.0.1:@@UPSTREAM_PORT@@@@BASE_PATH@@panel/api/server/status;
+        proxy_ssl_verify off;
+        proxy_method GET;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Authorization "";
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header X-Requested-With XMLHttpRequest;
+        proxy_set_header Host "@@PUBLIC_AUTHORITY@@";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto @@PUBLIC_SCHEME@@;
+        proxy_intercept_errors on;
+        error_page 404 = @xui_qos_auth_denied;
+    }
+
+    location @xui_qos_auth_denied {
+        return 401;
+    }
+
+    location = @@BASE_PATH@@qos-speed {
+        return 308 @@BASE_PATH@@qos-speed/;
+    }
+
+    location ^~ @@BASE_PATH@@qos-speed/ {
+        auth_request /_xui_qos_auth;
+        limit_req zone=xui_qos_general burst=20 nodelay;
+        proxy_pass http://127.0.0.1:@@BACKEND_PORT@@@@BACKEND_PATH@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host "@@PUBLIC_AUTHORITY@@";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto @@PUBLIC_SCHEME@@;
+        proxy_set_header X-Qos-Proxy-Secret "@@PROXY_SECRET@@";
+        proxy_set_header X-Qos-Embed-Token "@@EMBED_TOKEN@@";
+        proxy_set_header Connection "";
+        proxy_connect_timeout 3s;
+        proxy_send_timeout 170s;
+        proxy_read_timeout 170s;
+        proxy_hide_header Server;
+    }
+
+    location / {
+        proxy_pass @@UPSTREAM_SCHEME@@://127.0.0.1:@@UPSTREAM_PORT@@;
+        proxy_ssl_verify off;
+        proxy_http_version 1.1;
+        proxy_set_header Host "@@PUBLIC_AUTHORITY@@";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto @@PUBLIC_SCHEME@@;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $xui_qos_connection_upgrade;
+        proxy_set_header Accept-Encoding "";
+        proxy_connect_timeout 3s;
+        proxy_send_timeout 3600s;
+        proxy_read_timeout 3600s;
+        proxy_buffering off;
+        sub_filter_once on;
+        sub_filter '</head>' '<link rel="stylesheet" href="@@BASE_PATH@@xui-qos-integration.css"></head>';
+        sub_filter '</body>' '<script defer src="@@BASE_PATH@@xui-qos-integration.js"></script></body>';
+    }
+}

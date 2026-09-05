@@ -1,0 +1,14 @@
+*.env
+*.log
+*.tgz
+*.tar.gz
+*.zip
+__pycache__/
+*.py[cod]
+.idea/
+.vscode/
+.DS_Store
+nodes.json
+install-result.env
+backup/
+dist/

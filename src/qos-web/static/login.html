@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>节点速度管理 · 登录</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="login.js" defer></script>
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="login-card" aria-labelledby="login-title">
+      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+      <p class="eyebrow">XRAY QOS</p>
+      <h1 id="login-title">节点速度管理</h1>
+      <p class="login-copy">登录后查看实时线路速度，并分别调整两个节点的带宽上限。</p>
+
+      <form id="login-form" autocomplete="on">
+        <label for="username">管理账号</label>
+        <input id="username" name="username" type="text" autocomplete="username" required maxlength="128" autofocus>
+
+        <label for="password">管理密码</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256">
+
+        <p id="login-error" class="form-error" role="alert" aria-live="polite"></p>
+        <button id="login-button" class="primary-button" type="submit">进入控制台</button>
+      </form>
+      <p class="secure-note"><i></i> HTTPS 加密 · 独立权限控制</p>
+    </section>
+  </main>
+</body>
+</html>

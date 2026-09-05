@@ -1,0 +1,44 @@
+[Unit]
+Description=Xray QoS visual web dashboard
+After=network.target xray-qos-control.service
+Requires=xray-qos-control.service
+
+[Service]
+Type=simple
+User=xray-qos-web
+Group=xray-qos-web
+WorkingDirectory=/opt/xray-qos-web
+EnvironmentFile=/etc/xray-qos-web/web.env
+ExecStart=/usr/bin/python3 /opt/xray-qos-web/web.py
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=8s
+UMask=0077
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectClock=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+ReadOnlyPaths=/opt/xray-qos-web
+TasksMax=48
+MemoryMax=96M
+
+[Install]
+WantedBy=multi-user.target
