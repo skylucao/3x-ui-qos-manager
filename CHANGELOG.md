@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1
+
+- Optional PTR name reference hints in the existing audit table: possible infrastructure/service, common uses, low-confidence warning and official provenance.
+- Strict domain-label matches and explicit unknown fallback; no change to observed-domain classification, reports, mail or collection scope.
+- Tests for reference boundaries, untrusted text/links, cache isolation and stale node/date responses.
+
 ## 1.2.0
 
 - Embedded Manager Settings for total line bandwidth, management reserve and daily mail time (Asia/Shanghai).

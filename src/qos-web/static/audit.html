@@ -56,7 +56,7 @@
           <section class="audit-panel">
             <div class="audit-table-heading"><h2>目标域名 / IP</h2>
               <label class="audit-search">筛选目标 / 服务 <input id="target-filter" type="search" maxlength="253" placeholder="域名、IP 或服务名称" autocomplete="off"></label></div>
-            <p class="audit-muted">服务名称均为本地规则推测，不证明使用了对应 App、正在聊天或观看视频。连接出现小时不是连续使用时长；共享 IP 不猜测网站。</p>
+            <p class="audit-muted">服务名称均为本地规则推测，不证明使用了对应 App、正在聊天或观看视频。连接出现小时不是连续使用时长。点击“反查 IP”可查看可能关联的服务 / 基础设施及依据；此低可信度参考不改变域名识别与统计，不能确定共享 IP 上的具体网站。</p>
             <p id="target-note" class="audit-muted"></p>
             <div class="audit-table-scroll"><table>
               <thead><tr><th scope="col">连接目标</th><th scope="col">疑似网站 / 服务</th><th scope="col">识别依据</th><th scope="col">记录次数</th><th scope="col">首次 / 最后</th><th scope="col">连接出现小时</th></tr></thead>
@@ -69,7 +69,7 @@
     </div>
     <section class="audit-panel audit-mail"><h2>每日邮件</h2><p id="mail-status">状态读取中…</p>
       <p class="audit-muted"><a href="settings">修改每日发送时间</a>。网页刷新不会发送邮件；SMTP 接收不等于已进入收件箱。</p></section>
-    <footer class="audit-muted audit-footer">仅覆盖经过本 VPS 且实际记录的连接。公网 IP 可按需反查 PTR，结果只是参考主机名，不证明实际浏览网站；查询使用服务器的 DNS 服务。日志与汇总最多保留 2 天（北京时间：今天和昨天），超期自动清理；节点备注不受影响。已发邮件和手动导出不在服务器清理范围。历史节点名称来自保存时的日报；共用节点或变更端口会影响人员归属。节点未对应真实姓名时，不推断具体员工。</footer>
+    <footer class="audit-muted audit-footer">仅覆盖经过本 VPS 且实际记录的连接。公网 IP 可按需反查 PTR，查询使用服务器的 DNS 服务。可能服务参考仅匹配 PTR 名称；PTR 可自定义，未验证 IP 归属，不证明实际浏览网站。无依据时保留未知；参考不写入日报或邮件。日志与汇总最多保留 2 天（北京时间：今天和昨天），超期自动清理；节点备注不受影响。已发邮件和手动导出不在服务器清理范围。历史节点名称来自保存时的日报；共用节点或变更端口会影响人员归属。节点未对应真实姓名时，不推断具体员工。</footer>
   </main>
 </body>
 </html>

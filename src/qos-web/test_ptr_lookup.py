@@ -1,5 +1,6 @@
 import json
 import unittest
+from urllib.parse import urlsplit
 from unittest.mock import Mock, patch
 import ptr_lookup as ptr
 
@@ -52,3 +53,52 @@ class PtrTests(unittest.TestCase):
             ptr.lookup('2026-09-07', '8.8.8.8', self.reader)
             self.assertFalse(ptr.lookup('2026-09-07', '8.8.8.8', self.reader)['cached'])
             self.assertEqual(exchange.call_count, 2)
+
+    def test_reference_rules_have_provenance_and_low_confidence(self):
+        for suffix, exact, possibility, uses, source in ptr.REFERENCE_RULES:
+            name = suffix if exact else 'sample.' + suffix
+            with self.subTest(name=name):
+                value = ptr.reference_for(name.upper() + '.')
+                self.assertEqual(value['confidence'], 'low')
+                self.assertEqual(value['possibility'], possibility)
+                self.assertIn(suffix, value['basis'])
+                self.assertEqual(urlsplit(source).scheme, 'https')
+                self.assertIn('不能证明', value['limitation'])
+
+    def test_reference_suffix_boundaries_and_unknown_fallback(self):
+        for value in (None, '<script>', '8.8.8.8', 'youtube.example.test', 'qq.example.test',
+                      'not1e100.net', '1e100.net.evil.test', 'a.dns.google', 'telegram.org.evil.test',
+                      'notgithub.com', 'unknown.example.test'):
+            with self.subTest(value=value):
+                result = ptr.reference_for(value)
+                self.assertEqual(result['confidence'], 'unknown')
+                self.assertIsNone(result['source_url'])
+                self.assertIn('无法确定', result['possibility'])
+
+    def test_reference_never_claims_specific_product_on_shared_cloud(self):
+        for name in ('host.1e100.net', 'bucket.amazonaws.com', 'a.googleusercontent.com',
+                     'a.cloudfront.net', 'vm.cloudapp.azure.com'):
+            with self.subTest(name=name):
+                result = ptr.reference_for(name)
+                self.assertEqual(result['confidence'], 'low')
+                self.assertNotIn('YouTube', result['possibility'])
+                self.assertNotIn('EC2', result['possibility'])
+
+    def test_reference_is_response_only_and_recreated_after_cache(self):
+        raw = self.reader.return_value
+        dns = {'status': 'found', 'hostname': 'dns.google'}
+        with patch.object(ptr, 'exchange', return_value=dns):
+            first = ptr.lookup('2026-09-07', '8.8.8.8', self.reader)
+            self.assertEqual(first['reference']['confidence'], 'low')
+            first['reference']['possibility'] = 'changed by caller'
+            second = ptr.lookup('2026-09-07', '8.8.8.8', self.reader)
+            self.assertTrue(second['cached'])
+            self.assertNotEqual(second['reference']['possibility'], 'changed by caller')
+        self.assertEqual(self.reader.return_value, raw)
+        self.assertNotIn('reference', dns)
+        self.assertNotIn('reference', ptr.CACHE['8.8.8.8'][1])
+
+    def test_negative_results_have_no_service_guess(self):
+        for status in ('not_found', 'timeout', 'unavailable', 'busy'):
+            result = ptr.present({'status': status, 'hostname': 'dns.google'})
+            self.assertEqual(result['reference']['confidence'], 'unknown')

@@ -15,6 +15,57 @@ LOCK = threading.Lock()
 SLOTS = threading.BoundedSemaphore(2)
 LAST_QUERY = 0.0
 
+# Curated name associations only, NOT verified IP ownership or observed activity.
+# (suffix, exact-only, possible infrastructure, common uses, official provenance)
+REFERENCE_RULES = (
+    ('dns.google', True, '可能关联 Google Public DNS', '常见用途：域名解析；不能据此判断浏览了哪个网站。',
+     'https://developers.google.com/speed/public-dns/docs/doh'),
+    ('1e100.net', False, '可能关联 Google 共享网络基础设施', '可能承载多种 Google 产品，无法区分搜索、视频或其他服务。',
+     'https://support.google.com/faqs/answer/174717?hl=en-GB'),
+    ('googleusercontent.com', False, '可能关联 Google 托管资源 / 云基础设施', '常见用途：云主机、托管资源等；具体网站或应用未知。',
+     'https://docs.cloud.google.com/compute/docs/instances/create-ptr-record'),
+    ('amazonaws.com', False, '可能关联 AWS 云基础设施', '常见用途：云主机、存储或其他云服务；具体租户和网站未知。',
+     'https://docs.aws.amazon.com/general/latest/gr/rande.html'),
+    ('cloudfront.net', False, '可能关联 Amazon CloudFront CDN', '常见用途：网站静态资源、内容分发；具体站点未知。',
+     'https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/LinkFormat.html'),
+    ('cloudapp.azure.com', False, '可能关联 Microsoft Azure 云服务', '常见用途：云服务或虚拟机；具体租户和应用未知。',
+     'https://learn.microsoft.com/en-us/azure/security/fundamentals/azure-domains'),
+    ('telegram.org', False, '可能关联 Telegram 网站 / 服务基础设施', '可能用于网站或服务连接；不能判断是否聊天、聊天对象或内容。',
+     'https://core.telegram.org/api/config'),
+    ('t.me', False, '可能关联 Telegram 链接 / 网站服务', '可能用于链接跳转或网站服务；不能判断是否聊天或浏览了哪个频道。',
+     'https://core.telegram.org/api/config'),
+    ('github.com', False, '可能关联 GitHub 网站 / API 服务', '可能用于网站、API 或开发工具连接；不能判断操作了哪个仓库。',
+     'https://docs.github.com/en/enterprise-cloud@latest/admin/configuring-settings/hardening-security-for-your-enterprise/restricting-access-to-githubcom-using-a-corporate-proxy'),
+    ('githubassets.com', False, '可能关联 GitHub 静态资源服务', '常见用途：网页资源加载；不能证明正在浏览或编写代码。',
+     'https://docs.github.com/en/enterprise-cloud@latest/admin/configuring-settings/hardening-security-for-your-enterprise/restricting-access-to-githubcom-using-a-corporate-proxy'),
+    ('githubusercontent.com', False, '可能关联 GitHub 托管资源服务', '常见用途：托管内容或资源下载；具体文件和操作未知。',
+     'https://docs.github.com/en/enterprise-cloud@latest/admin/configuring-settings/hardening-security-for-your-enterprise/restricting-access-to-githubcom-using-a-corporate-proxy'),
+)
+REFERENCE_LIMITATION = '仅按 PTR 名称匹配，未验证 IP 归属；PTR 可自定义或失真，不能证明实际访问网站、使用 App 或聊天。'
+
+
+def reference_for(value):
+    """Return a separate, low-confidence hint; never feed it into audit statistics."""
+    try:
+        name = hostname(value)
+    except ValueError:
+        name = None
+    for suffix, exact, possibility, uses, source in REFERENCE_RULES:
+        if name and (name == suffix or (not exact and name.endswith('.' + suffix))):
+            return {'possibility': possibility, 'common_uses': uses, 'confidence': 'low',
+                    'basis': f'PTR 名称{"精确匹配" if exact else "匹配域名后缀"} {suffix}',
+                    'source_url': source, 'limitation': REFERENCE_LIMITATION}
+    return {'possibility': '无法确定具体网站 / 服务', 'confidence': 'unknown',
+            'basis': 'PTR 名称未命中已核对的参考规则' if name else '没有可用的 PTR 名称',
+            'common_uses': '一般可能是网站服务器、App 后台、云主机或 CDN；当前没有依据区分这些情况。',
+            'source_url': None, 'limitation': REFERENCE_LIMITATION}
+
+
+def present(result, cached=False):
+    # Decorate after DNS IPC/cache; the worker stays bounded to a hostname/status.
+    name = result.get('hostname') if result.get('status') == 'found' else None
+    return {**result, 'cached': cached, 'reference': reference_for(name)}
+
 
 def public_ip(value):
     if not isinstance(value, str) or len(value) > 45 or '%' in value:
@@ -108,12 +159,12 @@ def lookup(day, value, reader):
             del CACHE[key]
         cached = CACHE.get(ip)
         if cached:
-            return {**cached[1], 'cached': True}
+            return present(cached[1], cached=True)
         if now - LAST_QUERY < 1:
-            return {'hostname': None, 'status': 'busy', 'cached': False}
+            return present({'hostname': None, 'status': 'busy'})
         LAST_QUERY = now
     if not SLOTS.acquire(blocking=False):
-        return {'hostname': None, 'status': 'busy', 'cached': False}
+        return present({'hostname': None, 'status': 'busy'})
     try:
         try:
             result = exchange(ip)
@@ -123,7 +174,7 @@ def lookup(day, value, reader):
             CACHE[ip] = (now, result)
             while len(CACHE) > 512:
                 CACHE.popitem(last=False)
-        return {**result, 'cached': False}
+        return present(result)
     finally:
         SLOTS.release()
 

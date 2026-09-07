@@ -6,9 +6,28 @@
 
 - 经过本 VPS 并实际记入日志的目标域名或 IP、连接次数、首末记录时间、连接出现的小时。
 - 各节点独立显示；新增节点会在下一次成功汇总时被发现，通常约 2 分钟。
-- “疑似网站/服务”只按本地域名规则关联，表格可查看依据。公网 IP 可点击“反查 IP”查询 PTR：仅把所选 IP 的反向 DNS 问题发送给服务器配置的 DNS 解析器，不发送整份访问记录。共享 IP 或 PTR 主机名不能证明访问了哪个网站，也不用于服务分类。
+- “疑似网站/服务”只按实际记录的域名匹配本地规则，表格可查看依据。公网 IP 可点击“反查 IP”查询 PTR：仅把所选 IP 的反向 DNS 问题发送给服务器配置的 DNS 解析器，不发送整份访问记录。额外的“可能服务”参考独立展示，不改变原始服务分类、连接统计、日报或邮件。
 
 连接记录不等于网页浏览次数、访问成功、前台 App 使用时间或员工工作时长。后台同步也会建立连接。不能读取 HTTPS 网页正文、微信/QQ/Telegram 聊天内容或视频内容，也不采集截图、键盘和客户端活动。旧汇总缺少字段时不会补造历史数据。
+
+## IP 反查的可能服务参考（v1.2.1）
+
+在原审计表格点击“反查 IP”，可查看主机名、可能关联的服务/基础设施、常见用途、匹配依据和官方来源。下面只是规则示例，不代表任何真实员工活动：
+
+| PTR 名称匹配 | 可能关联 | 规则依据 |
+| --- | --- | --- |
+| 精确 `dns.google` | Google Public DNS 域名解析 | [Google Public DNS](https://developers.google.com/speed/public-dns/docs/doh) |
+| `1e100.net` 后缀 | Google 共享网络；无法区分搜索、视频等产品 | [Google 域名说明](https://support.google.com/faqs/answer/174717?hl=en-GB) |
+| `googleusercontent.com` 后缀 | Google 托管资源 / 云基础设施 | [Google Cloud PTR](https://docs.cloud.google.com/compute/docs/instances/create-ptr-record) |
+| `amazonaws.com` 后缀 | AWS 云基础设施，不直接认定 EC2 或具体网站 | [AWS 服务端点](https://docs.aws.amazon.com/general/latest/gr/rande.html) |
+| `cloudfront.net` 后缀 | CloudFront 内容分发，具体站点未知 | [CloudFront 域名](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/LinkFormat.html) |
+| `cloudapp.azure.com` 后缀 | Azure 云服务 / 虚拟机，具体应用未知 | [Azure 域名表](https://learn.microsoft.com/en-us/azure/security/fundamentals/azure-domains) |
+| `telegram.org` / `t.me` 后缀 | Telegram 网站 / 服务，不代表正在聊天 | [Telegram 配置域名](https://core.telegram.org/api/config) |
+| `github.com` / `githubassets.com` / `githubusercontent.com` 后缀 | GitHub 网站 / API / 托管资源，不代表具体仓库操作 | [GitHub 网络域名](https://docs.github.com/en/enterprise-cloud@latest/admin/configuring-settings/hardening-security-for-your-enterprise/restricting-access-to-githubcom-using-a-corporate-proxy) |
+
+后缀按完整域名标签边界匹配，`1e100.net.evil.example` 不会命中 Google。没有 PTR、查询失败或未命中规则时显示“无法确定”，不做关键词猜测或虚构概率。所有命中均标“可信度低”：PTR 可自定义或失真，并未验证 IP 归属；官方来源只说明域名的常见用途，不证明该 IP 属于该服务，更不证明员工的前台活动。可参考 [Azure 自定义反向 DNS 的限制](https://learn.microsoft.com/en-us/azure/dns/dns-reverse-dns-for-azure-services)。
+
+参考规则在本地执行，不调用第三方 IP 画像 / 内容分析接口，不自动访问返回的主机名，也不会把推测追加到审计记录中。此功能不提供网页正文、聊天内容、观看内容或使用时长。
 
 ## 安装前提
 
@@ -23,11 +42,11 @@
 把示例地址替换成自己的收件邮箱，明确启用附加组件：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/skylucao/3x-ui-qos-manager/v1.2.0/scripts/install-audit.sh \
+curl -fsSL https://raw.githubusercontent.com/skylucao/3x-ui-qos-manager/v1.2.1/scripts/install-audit.sh \
   | sudo bash -s -- --acknowledge-notice --recipient owner@example.com
 ```
 
-也可下载/克隆 v1.2.0 后运行：
+也可下载/克隆 v1.2.1 后运行（参考提示需要先更新基础组件至 v1.2.1）：
 
 ```bash
 sudo bash scripts/install-audit.sh --acknowledge-notice --recipient owner@example.com

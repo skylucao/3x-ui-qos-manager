@@ -5,6 +5,26 @@
   const clock = (v) => v ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(v)) : '未记录';
   let catalog = null, current = null, selectedKey = null, busy = false, signedOut = false;
   const el = (tag, text, className) => { const node = document.createElement(tag); node.textContent = text; if (className) node.className = className; return node; };
+  function ptrReference(container, result) {
+    const messages = { not_found: '未查到 PTR 记录', timeout: 'DNS 查询超时', unavailable: '反查服务暂不可用', busy: '查询繁忙，请稍后重试' };
+    container.replaceChildren(el('span', result.status === 'found' ? `参考主机名：${result.hostname}` : messages[result.status] || '未查到'));
+    const hint = result.reference;
+    if (!hint) { container.append(el('span', '仅供参考，不代表实际访问的网站。', 'audit-service-meta')); return; }
+    const box = el('div', '', 'audit-ptr-hint');
+    box.append(el('strong', hint.possibility), el('span', hint.common_uses, 'audit-service-meta'),
+      el('span', `依据：${hint.basis} · ${hint.confidence === 'low' ? '可信度低' : '无法判断'}`, 'audit-service-meta'),
+      el('span', hint.limitation, 'audit-service-meta'));
+    if (hint.source_url) {
+      try {
+        const url = new URL(hint.source_url);
+        const hosts = ['developers.google.com', 'support.google.com', 'docs.cloud.google.com', 'docs.aws.amazon.com', 'learn.microsoft.com', 'core.telegram.org', 'docs.github.com'];
+        if (url.protocol === 'https:' && hosts.includes(url.hostname) && !url.username && !url.password && !url.port) {
+          const link = el('a', '参考规则的官方依据', 'audit-rule-link'); link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer'; box.append(link);
+        }
+      } catch (_) { /* Never open untrusted PTR names or malformed provenance. */ }
+    }
+    container.append(box);
+  }
   async function get(path) {
     const response = await fetch(path, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
     if (response.status === 401 || response.status === 403 || response.redirected || !response.headers.get('content-type')?.includes('application/json')) {
@@ -61,7 +81,8 @@
       const target = el('td', item.destination + (item.kind === 'ip' ? '（IP）' : ''));
       if (item.kind === 'ip') {
         const button = el('button', '反查 IP', 'ghost-button'); button.type = 'button';
-        const reference = el('small', '按需查询 PTR，不用于判定网站', 'audit-service-meta');
+        const reference = el('div', '按需查看 PTR 与可能服务参考', 'audit-service-meta');
+        reference.setAttribute('aria-live', 'polite');
         const day = current.report_date, key = selectedKey;
         button.addEventListener('click', async () => {
           button.disabled = true; reference.textContent = '正在反查…';
@@ -73,8 +94,7 @@
             const result = await response.json();
             if (!response.ok) throw new Error(result.message || '查询暂不可用');
             if (!target.isConnected || current?.report_date !== day || selectedKey !== key) return;
-            const messages = { not_found: '未查到 PTR 记录', timeout: 'DNS 查询超时', unavailable: '反查服务暂不可用', busy: '查询繁忙，请稍后重试' };
-            reference.textContent = result.status === 'found' ? `参考主机名：${result.hostname}（不代表访问的网站）` : messages[result.status] || '未查到';
+            ptrReference(reference, result);
           } catch (error) {
             if (target.isConnected && current?.report_date === day && selectedKey === key) reference.textContent = error.name === 'TimeoutError' ? '查询超时，请稍后重试' : error.message;
           } finally { button.disabled = false; }

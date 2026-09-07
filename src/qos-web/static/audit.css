@@ -39,6 +39,8 @@
 .audit-service-meta, .audit-rule-link { display: block; margin-top: 6px; font-size: 14px; }
 .audit-service-meta { color: #adbed2; }
 .audit-rule-link { color: #89caff; }
+.audit-ptr-hint { margin-top: 10px; padding: 10px; border-left: 2px solid #647f9d; background: #172739; line-height: 1.6; }
+.audit-ptr-hint strong { color: #d4e6f8; font-weight: 600; }
 .audit-mail { margin-top: 24px; }
 .audit-footer { padding-bottom: 24px; }
 @media (max-width: 1000px) { .audit-layout { grid-template-columns: 1fr; } #node-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .audit-sidebar { margin-bottom: 0; } }
