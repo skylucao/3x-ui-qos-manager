@@ -1,0 +1,23 @@
+[Unit]
+Description=Generate and email the previous day's per-node connection digest
+After=network-online.target x-ui.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/xray-audit/daily.py
+TimeoutStartSec=420
+SuccessExitStatus=78
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/xray-audit
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

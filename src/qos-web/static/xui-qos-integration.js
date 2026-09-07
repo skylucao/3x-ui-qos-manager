@@ -41,18 +41,18 @@
     launcher.hidden = true;
     launcher.setAttribute("aria-haspopup", "dialog");
     launcher.setAttribute("aria-expanded", "false");
-    launcher.innerHTML = '<span class="xqos-launcher-icon" aria-hidden="true">⇅</span><span>网速管理</span>';
+    launcher.innerHTML = '<span class="xqos-launcher-icon" aria-hidden="true">⇅</span><span>网速 / 审计</span>';
 
     overlay = document.createElement("section");
     overlay.className = "xqos-overlay";
     overlay.hidden = true;
     overlay.setAttribute("role", "dialog");
     overlay.setAttribute("aria-modal", "true");
-    overlay.setAttribute("aria-label", "节点网速管理");
+    overlay.setAttribute("aria-label", "节点网速与审计管理");
     overlay.innerHTML = `
       <div class="xqos-window">
         <header class="xqos-window-head">
-          <div><span class="xqos-live" aria-hidden="true"></span><strong>节点网速管理</strong><small>已使用 3x-ui 登录状态</small></div>
+          <div><span class="xqos-live" aria-hidden="true"></span><strong>节点网速与审计</strong><small>已使用 3x-ui 登录状态</small></div>
           <button class="xqos-close" type="button" aria-label="关闭网速管理">×</button>
         </header>
         <iframe class="xqos-frame" title="节点网速管理"></iframe>
@@ -86,6 +86,7 @@
     } catch (_error) {
       launcher.hidden = true;
       closePanel();
+      frame?.removeAttribute("src");
     }
   }
 

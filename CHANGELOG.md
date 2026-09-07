@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0
+
+- Persistent per-node notes with versioned saves, 200-character limit, and existing-session/CSRF checks.
+- Integrated, opt-in connection audit views with date/node filtering, domain/IP counts and discrete hourly observations.
+- Conservative offline service associations with source links; no chat/page content capture or claimed usage duration.
+- Capped seven-Shanghai-calendar-date retention for raw logs, private reports and web projections; expired API dates rejected independently of cleanup timing.
+- Independent hourly retention, closed-log atomic pruning, and safe handling of interrupted temporary writes.
+- Explicit audit add-on installer, generic recipient configuration, SMTP reuse from 3x-ui, and documented scope/stop procedure.
+- Extended release checks and CI for audit, notes, retention, installer integration and asynchronous UI state.
+
 ## 1.0.0
 
 - Initial release.

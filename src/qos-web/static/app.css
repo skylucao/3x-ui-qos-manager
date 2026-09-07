@@ -16,6 +16,9 @@
   --radius: 19px;
 }
 
+.page-nav { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 24px; }
+.page-nav [aria-current="page"] { border-color: #52adff; color: #8ecbff; background: #16334b; }
+
 * { box-sizing: border-box; }
 
 html { min-height: 100%; }

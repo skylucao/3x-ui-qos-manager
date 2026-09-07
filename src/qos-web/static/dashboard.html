@@ -7,6 +7,8 @@
   <meta name="csrf-token" content="__CSRF_TOKEN__">
   <title>节点速度管理</title>
   <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="notes.css">
+  <script src="notes.js" defer></script>
   <script src="dashboard.js" defer></script>
 </head>
 <body class="__BODY_CLASS__">
@@ -23,6 +25,11 @@
         <button id="logout" class="ghost-button" type="button">退出</button>
       </div>
     </header>
+
+    <nav class="page-nav" aria-label="节点管理功能">
+      <a class="ghost-button" href="./" aria-current="page">网速管理</a>
+      <a class="ghost-button" href="audit">网站连接审计</a>
+    </nav>
 
     <section class="pool" aria-label="带宽池">
       <div class="pool-label">
@@ -56,6 +63,8 @@
         </div>
         <span class="pill node-health"><i></i><span>检查中</span></span>
       </div>
+
+      <div class="node-note-editor"></div>
 
       <div class="metrics">
         <div class="metric metric-down">

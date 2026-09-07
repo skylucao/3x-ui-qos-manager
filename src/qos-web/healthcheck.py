@@ -56,3 +56,7 @@ if "--set-current" in sys.argv:
             raise SystemExit(f"controller write check failed: {result.get('message', 'unknown error')}")
 
 print("controller-health-ok")
+
+import node_notes
+node_notes.read(node_notes.inventory(request({"v": 1, "op": "nodes"})))
+print("node-notes-health-ok")

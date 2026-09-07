@@ -1,0 +1,28 @@
+[Unit]
+Description=Publish private per-node audit web summaries
+After=x-ui.service
+
+[Service]
+Type=oneshot
+User=root
+Group=xray-qos-web
+UMask=0027
+ExecStart=/usr/bin/python3 -B /opt/xray-audit/snapshot.py
+TimeoutStartSec=90
+Nice=10
+CPUQuota=25%
+MemoryMax=256M
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/xray-audit-web /var/lib/xray-audit/daily.lock

@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FORBIDDEN_NAMES = {"web.env", "nodes.json", "install-result.env"}
-FORBIDDEN_SUFFIXES = {".pyc", ".tgz", ".zip"}
+FORBIDDEN_NAMES = {"web.env", "nodes.json", "install-result.env", "metadata.json", "last-run.json", "node-notes.sqlite3"}
+FORBIDDEN_SUFFIXES = {".pyc", ".tgz", ".zip", ".gz", ".db", ".sqlite", ".sqlite3", ".pem", ".key", ".cer", ".crt"}
 SECRET_PATTERNS = {
     "private key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
     "filled proxy secret": re.compile(r"^QOS_PROXY_SECRET=[A-Za-z0-9_-]{32,}$", re.MULTILINE),
@@ -22,7 +22,10 @@ def main() -> int:
         if ".git" in path.parts or not path.is_file():
             continue
         relative = path.relative_to(ROOT)
-        if path.name in FORBIDDEN_NAMES or path.suffix.lower() in FORBIDDEN_SUFFIXES:
+        if relative.as_posix() == 'src/xray-audit/config.json' or any(part in {'reports', 'receipts'} for part in relative.parts[:-1]):
+            errors.append(f"private audit state: {relative}")
+            continue
+        if path.name in FORBIDDEN_NAMES or path.suffix.lower() in FORBIDDEN_SUFFIXES or re.fullmatch(r'(?:setup-)?\d{4}-\d{2}-\d{2}\.(?:txt|json)', path.name):
             errors.append(f"forbidden artifact: {relative}")
             continue
         try:

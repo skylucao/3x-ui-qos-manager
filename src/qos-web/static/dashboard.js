@@ -268,6 +268,7 @@ function renderNode(id) {
   const node = record.server;
   card.querySelector("h2").textContent = node.name;
   card.querySelector(".node-port").textContent = `${String(node.protocol).toUpperCase()} · 端口 ${node.port} · ID ${node.inbound_id}`;
+  window.NodeNotes.mount(card.querySelector('.node-note-editor'), node);
   const badge = card.querySelector(".node-health");
   let badgeClass = "offline";
   let badgeText = "离线";

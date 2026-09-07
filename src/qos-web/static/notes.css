@@ -1,0 +1,8 @@
+.note-editor { margin: 18px 0; padding: 16px; border: 1px solid #334b63; border-radius: 10px; background: #102234; }
+.note-label { display: block; font-size: 14px; color: #d9e6f3; }
+.note-label textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 10px; padding: 10px 12px; background: #0c1928; border: 1px solid #4c617c; color: #e7f1ff; border-radius: 8px; font: inherit; font-size: 16px; line-height: 1.6; resize: vertical; }
+.note-label textarea:focus-visible { outline: 2px solid #89caff; outline-offset: 2px; }
+.note-actions { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+.note-status, .note-hint { font-size: 14px; line-height: 1.6; color: #b2c7dc; overflow-wrap: anywhere; }
+.note-hint { margin: 12px 0 0; }
+.note-label textarea:disabled { opacity: .65; }

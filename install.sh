@@ -4,9 +4,9 @@ set -Eeuo pipefail
 umask 077
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-VERSION=1.0.0
+VERSION=1.1.0
 DEFAULT_REPOSITORY="skylucao/3x-ui-qos-manager"
-DEFAULT_RELEASE_REF="v1.0.0"
+DEFAULT_RELEASE_REF="v1.1.0"
 XUI_INSTALLER_REF="v3.7.0"
 XUI_INSTALLER_SHA256="a7f4fedcea3abe8987508d00f29834b8872e4e4e5059159eb19460d474b37cdc"
 
@@ -167,6 +167,8 @@ for required_file in \
     src/xray-qos \
     src/qos-web/control.py \
     src/qos-web/web.py \
+    src/qos-web/audit_view.py \
+    src/qos-web/node_notes.py \
     src/qos-web/healthcheck.py \
     src/qos-web/static/dashboard.html \
     src/qos-web/static/xui-qos-integration.js \
@@ -562,6 +564,15 @@ install -o root -g root -m 0755 "$source_root/src/xray-qos" /usr/local/sbin/xray
 install -o root -g root -m 0755 "$source_root/src/qos-web/control.py" /opt/xray-qos-web/control.py
 install -o root -g root -m 0755 "$source_root/src/qos-web/web.py" /opt/xray-qos-web/web.py
 install -o root -g root -m 0755 "$source_root/src/qos-web/healthcheck.py" /opt/xray-qos-web/healthcheck.py
+install -o root -g root -m 0644 "$source_root/src/qos-web/audit_view.py" /opt/xray-qos-web/audit_view.py
+install -o root -g root -m 0644 "$source_root/src/qos-web/node_notes.py" /opt/xray-qos-web/node_notes.py
+# Notes are independent application state: preserve them on upgrade/rollback.
+[[ ! -L /var/lib/xray-qos-web ]] || die "notes directory must not be a symlink"
+if [[ -e /var/lib/xray-qos-web ]]; then
+    [[ $(stat -c '%U' /var/lib/xray-qos-web) == xray-qos-web ]] || die "notes directory has an unexpected owner"
+fi
+install -d -m 0700 -o xray-qos-web -g xray-qos-web /var/lib/xray-qos-web
+runuser -u xray-qos-web -- python3 -B /opt/xray-qos-web/node_notes.py
 for static_file in "$source_root"/src/qos-web/static/*; do
     install -o root -g root -m 0644 "$static_file" "/opt/xray-qos-web/static/$(basename -- "$static_file")"
 done
@@ -737,6 +748,8 @@ chmod 0600 /etc/xray-qos-web/install-result.env
     /usr/local/sbin/xray-qos \
     /opt/xray-qos-web/control.py \
     /opt/xray-qos-web/web.py \
+    /opt/xray-qos-web/audit_view.py \
+    /opt/xray-qos-web/node_notes.py \
     /opt/xray-qos-web/healthcheck.py
 nginx -t
 
@@ -790,5 +803,5 @@ finished=yes
 echo
 echo "xui-qos install: completed"
 echo "3x-ui: $panel_url"
-echo "Open 3x-ui and click '网速管理'."
+echo "Open 3x-ui and click '网速 / 审计'. Node notes are ready; connection auditing is opt-in (see README)."
 echo "Backup: $backup_dir"

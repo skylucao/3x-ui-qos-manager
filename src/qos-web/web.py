@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import socket
+import sqlite3
 import threading
 import time
 from collections import deque
@@ -23,6 +24,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+
+import audit_view
+import node_notes
 
 
 BIND = os.environ.get("QOS_WEB_BIND", "127.0.0.1")
@@ -63,6 +67,10 @@ STATIC_TYPES = {
     "app.css": "text/css; charset=utf-8",
     "login.js": "application/javascript; charset=utf-8",
     "dashboard.js": "application/javascript; charset=utf-8",
+    "audit.js": "application/javascript; charset=utf-8",
+    "audit.css": "text/css; charset=utf-8",
+    "notes.js": "application/javascript; charset=utf-8",
+    "notes.css": "text/css; charset=utf-8",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -432,9 +440,12 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.close_connection = True
             return
-        if path == path_for():
+        if path in (path_for(), path_for("audit")):
             session_data = self.current_session()
-            filename = "dashboard.html" if session_data else "login.html"
+            if path == path_for("audit") and not session_data:
+                self.send_error_json(HTTPStatus.UNAUTHORIZED, "请先登录 3x-ui 或节点管理页面")
+                return
+            filename = ("audit.html" if path == path_for("audit") else "dashboard.html") if session_data else "login.html"
             try:
                 text = (STATIC_DIR / filename).read_text(encoding="utf-8")
             except OSError:
@@ -445,6 +456,31 @@ class Handler(BaseHTTPRequestHandler):
                 text = text.replace("__PANEL_URL__", html.escape(PANEL_URL, quote=True))
                 text = text.replace("__BODY_CLASS__", "embedded" if self.embedded_request() else "")
             self.send_bytes(HTTPStatus.OK, text.encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if path in (path_for("api/audit/index"), path_for("api/audit/report")):
+            if self.current_session() is None:
+                self.send_error_json(HTTPStatus.UNAUTHORIZED, "请先登录")
+                return
+            try:
+                query = urlsplit(self.path).query
+                if path == path_for("api/audit/index"):
+                    if query:
+                        raise ValueError("unexpected query")
+                    name = "index.json"
+                else:
+                    name = audit_view.requested_date(query) + ".json"
+            except ValueError:
+                self.send_error_json(HTTPStatus.BAD_REQUEST, "日期参数无效")
+                return
+            try:
+                payload = audit_view.read(name)
+            except FileNotFoundError:
+                self.send_error_json(HTTPStatus.NOT_FOUND, "该日期尚无可用汇总")
+                return
+            except (OSError, ValueError, TypeError):
+                self.send_error_json(HTTPStatus.SERVICE_UNAVAILABLE, "审计汇总暂不可用，请稍后重试")
+                return
+            self.send_bytes(HTTPStatus.OK, payload, "application/json; charset=utf-8")
             return
         for name in STATIC_TYPES:
             if path == path_for(name):
@@ -461,6 +497,21 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error_json(HTTPStatus.SERVICE_UNAVAILABLE, "限速控制器暂不可用")
                 return
             self.send_json(HTTPStatus.OK if result.get("ok") else HTTPStatus.SERVICE_UNAVAILABLE, result)
+            return
+        if path == path_for("api/notes"):
+            if self.current_session() is None:
+                self.send_error_json(HTTPStatus.UNAUTHORIZED, "请先登录")
+                return
+            if urlsplit(self.path).query:
+                self.send_error_json(HTTPStatus.BAD_REQUEST, "备注请求不接受查询参数")
+                return
+            try:
+                nodes = node_notes.inventory(control_request({"v": 1, "op": "nodes"}))
+                data = node_notes.read(nodes)
+            except (OSError, RuntimeError, ValueError, KeyError, TypeError, sqlite3.Error):
+                self.send_error_json(HTTPStatus.SERVICE_UNAVAILABLE, "节点或备注暂不可用，未进行任何修改")
+                return
+            self.send_json(HTTPStatus.OK, {"ok": True, "nodes": data})
             return
         self.send_error_json(HTTPStatus.NOT_FOUND, "页面不存在")
 
@@ -485,7 +536,44 @@ class Handler(BaseHTTPRequestHandler):
         if path == path_for("api/set"):
             self.handle_set()
             return
+        if path == path_for("api/notes"):
+            self.handle_note()
+            return
         self.send_error_json(HTTPStatus.NOT_FOUND, "页面不存在")
+
+    def handle_note(self) -> None:
+        if self.require_session_and_csrf() is None:
+            return
+        if urlsplit(self.path).query:
+            self.send_error_json(HTTPStatus.BAD_REQUEST, "备注请求不接受查询参数")
+            return
+        payload = self.read_json()
+        if payload is None:
+            return
+        try:
+            if set(payload) != {"node_id", "port", "protocol", "note", "expected_revision"}:
+                raise ValueError("unexpected fields")
+            chosen = node_notes.identity(payload["node_id"], payload["port"], payload["protocol"])
+            value = node_notes.note_text(payload["note"])
+            revision = payload["expected_revision"]
+            if type(revision) is not int or not 0 <= revision <= 2**53 - 1:
+                raise ValueError("invalid revision")
+        except (ValueError, KeyError, TypeError):
+            self.send_error_json(HTTPStatus.BAD_REQUEST, "备注限 200 字，节点信息或版本号无效")
+            return
+        try:
+            nodes = node_notes.inventory(control_request({"v": 1, "op": "nodes"}))
+            if chosen not in nodes:
+                self.send_error_json(HTTPStatus.CONFLICT, "节点已删除或端口/协议已变更，请刷新后核对")
+                return
+            saved = node_notes.save(chosen, value, revision)
+        except node_notes.Conflict as conflict:
+            self.send_json(HTTPStatus.CONFLICT, {"ok": False, "message": "其他页面已修改备注，请先载入最新备注", "current": conflict.current})
+            return
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError, sqlite3.Error):
+            self.send_error_json(HTTPStatus.SERVICE_UNAVAILABLE, "备注保存未能确认，请刷新核对后再试")
+            return
+        self.send_json(HTTPStatus.OK, {"ok": True, "node": saved})
 
     def handle_login(self) -> None:
         if not self.valid_origin():

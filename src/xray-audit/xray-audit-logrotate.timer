@@ -1,0 +1,12 @@
+[Unit]
+Description=Check private audit log rotation hourly
+
+[Timer]
+OnCalendar=*-*-* *:00:00 Asia/Shanghai
+OnBootSec=30
+AccuracySec=1s
+Persistent=true
+Unit=xray-audit-logrotate.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh per-node audit web summaries every two minutes
+
+[Timer]
+OnBootSec=30
+OnUnitInactiveSec=120
+AccuracySec=10
+Unit=xray-audit-snapshot.service
+
+[Install]
+WantedBy=timers.target

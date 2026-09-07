@@ -288,3 +288,7 @@ finished=yes
 
 echo "xui-qos uninstall: removed; original 3x-ui listening mode restored"
 echo "rollback backup: $uninstall_backup"
+echo "Node notes in /var/lib/xray-qos-web are preserved."
+if [[ -f /opt/xray-audit/.managed-by-codex-audit ]]; then
+    echo "The separate audit add-on remains installed (including retention and scheduled mail). See docs/AUDIT.md to stop collection safely."
+fi

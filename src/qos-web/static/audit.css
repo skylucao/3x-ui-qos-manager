@@ -1,0 +1,45 @@
+.audit-page { font-size: 16px; }
+.audit-page [hidden] { display: none !important; }
+.audit-page .shell { max-width: 1440px; }
+.audit-page h2 { font-size: 20px; margin: 0 0 10px; }
+.audit-page h3 { font-size: 16px; margin: 26px 0 8px; }
+.audit-muted { color: #aebed0; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.audit-notice, .audit-warnings { padding: 16px 20px; border: 1px solid #475773; border-radius: 12px; background: #172332; line-height: 1.8; }
+.audit-warnings { border-color: #806235; background: #2b251c; color: #f1d39e; margin-bottom: 20px; }
+.audit-warnings p { margin: 4px 0; }
+.audit-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 24px; flex-wrap: wrap; }
+.audit-toolbar select, .audit-search input { font: inherit; color: #e7f1ff; background: #0d1826; border: 1px solid #42556e; border-radius: 8px; padding: 10px 12px; }
+.audit-toolbar select { margin-left: 10px; }
+.audit-page :focus-visible { outline: 2px solid #89caff; outline-offset: 4px; }
+.audit-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; align-items: start; }
+.audit-panel { padding: 22px; border: 1px solid #2c4058; border-radius: 14px; background: #111e2e; margin-bottom: 20px; }
+.audit-node { display: block; text-align: left; width: 100%; margin-top: 10px; padding: 14px; background: #15263a; color: #e7f1ff; border: 1px solid #314964; border-radius: 10px; cursor: pointer; font: inherit; }
+.audit-node[aria-pressed="true"] { background: #163652; border-color: #65b4f5; }
+.audit-node strong, .audit-node span { display: block; overflow-wrap: anywhere; }
+.audit-node span { margin-top: 6px; font-size: 14px; color: #b4cadf; }
+.audit-metrics { display: grid; grid-template-columns: 1fr 1fr 1.6fr; gap: 16px; padding-top: 12px; }
+.audit-metrics dt { color: #aebed0; font-size: 14px; }
+.audit-metrics dd { margin: 8px 0 0; font-size: 28px; font-weight: 650; }
+.audit-metrics .audit-time { font-size: 18px; line-height: 1.6; }
+.hour-chart { height: 156px; display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 5px; align-items: stretch; margin-top: 16px; }
+.hour-slot { display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; gap: 8px; min-width: 0; }
+.hour-bar { height: var(--bar-height, 2px); min-height: 2px; background: #51b6ec; border-radius: 3px 3px 0 0; }
+.hour-slot.future .hour-bar { background: transparent; height: 6px; border: 1px dashed #64758d; }
+.hour-label { text-align: center; color: #acbfd4; font-size: 14px; }
+.audit-table-heading { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.audit-search { color: #aebed0; font-size: 14px; }
+.audit-search input { width: 200px; margin-left: 8px; }
+.audit-table-scroll { overflow-x: auto; }
+.audit-page table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.audit-page th, .audit-page td { text-align: left; padding: 14px 10px; border-bottom: 1px solid #2b3e53; vertical-align: top; }
+.audit-page th { color: #bacde0; font-weight: 500; white-space: nowrap; }
+.audit-page td:first-child { overflow-wrap: anywhere; min-width: 160px; max-width: 320px; }
+.audit-page td:nth-child(5) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.audit-page td:last-child { min-width: 180px; max-width: 270px; line-height: 1.6; }
+.audit-service-meta, .audit-rule-link { display: block; margin-top: 6px; font-size: 14px; }
+.audit-service-meta { color: #adbed2; }
+.audit-rule-link { color: #89caff; }
+.audit-mail { margin-top: 24px; }
+.audit-footer { padding-bottom: 24px; }
+@media (max-width: 1000px) { .audit-layout { grid-template-columns: 1fr; } #node-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .audit-sidebar { margin-bottom: 0; } }
+@media (max-width: 600px) { .audit-metrics { grid-template-columns: 1fr 1fr; } .audit-metrics > div:last-child { grid-column: 1 / -1; } .audit-panel { padding: 16px; } .hour-chart { gap: 3px; } .hour-slot:nth-child(even) .hour-label { visibility: hidden; } .audit-toolbar select { max-width: 220px; } }

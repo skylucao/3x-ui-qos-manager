@@ -732,6 +732,14 @@ def response_for(request: dict[str, Any]) -> dict[str, Any]:
         if set(request) != {"v", "op"}:
             raise ControllerError("invalid", "请求字段不正确")
         return STATE.status()
+    if request["op"] == "nodes":
+        if set(request) != {"v", "op"}:
+            raise ControllerError("invalid", "请求字段不正确")
+        # Dedicated fresh read: never samples rates, syncs tc, or changes profiles.
+        values = read_key_values(CONFIG_PATH)
+        nodes = read_inbounds(Path(values.get("XRAY_DB", "/etc/x-ui/x-ui.db")))
+        return {"ok": True, "sample_time_ms": int(time.time() * 1000), "discovery_stale": False,
+                "nodes": [{key: node[key] for key in ("inbound_id", "port", "protocol")} for node in nodes]}
     if request["op"] == "set":
         return STATE.set_limit(request)
     raise ControllerError("invalid", "不支持的操作")

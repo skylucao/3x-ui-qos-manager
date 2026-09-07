@@ -1,0 +1,11 @@
+[Unit]
+Description=Company node digest at 09:00 Asia/Shanghai every day
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 Asia/Shanghai
+Persistent=true
+AccuracySec=1min
+Unit=xray-audit-daily.service
+
+[Install]
+WantedBy=timers.target

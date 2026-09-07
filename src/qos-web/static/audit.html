@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="csrf-token" content="__CSRF_TOKEN__">
+  <title>网站连接审计 · 节点管理</title>
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="audit.css">
+  <link rel="stylesheet" href="notes.css">
+  <script src="notes.js" defer></script>
+  <script src="audit.js" defer></script>
+</head>
+<body class="__BODY_CLASS__ audit-page">
+  <main class="shell">
+    <header class="topbar">
+      <div><p class="eyebrow">NODE AUDIT</p><h1>网站连接审计</h1>
+        <p class="subtitle">按节点查看目标域名 / IP 与连接记录，统一使用北京时间</p></div>
+      <button id="refresh" class="ghost-button" type="button">刷新汇总</button>
+    </header>
+    <nav class="page-nav" aria-label="节点管理功能">
+      <a class="ghost-button" href="./">网速管理</a>
+      <a class="ghost-button" href="audit" aria-current="page">网站连接审计</a>
+    </nav>
+    <section class="audit-notice" aria-label="统计范围">
+      这里只能说明节点发生了连接，不能证明员工打开了网页或正在工作。包含应用后台连接和被阻断的连接；不采集网页正文、聊天内容、搜索词或完整 URL。
+    </section>
+    <div class="audit-toolbar">
+      <label for="report-date">报告日期 <select id="report-date" disabled><option>正在读取…</option></select></label>
+      <span id="updated" class="audit-muted"></span>
+    </div>
+    <p id="load-status" role="status" aria-live="polite">正在读取汇总…</p>
+    <div id="warnings" class="audit-warnings" hidden></div>
+    <div id="report-content" hidden>
+      <p id="report-summary" class="audit-muted"></p>
+      <div class="audit-layout">
+        <section class="audit-panel audit-sidebar" aria-label="选择节点">
+          <h2>节点</h2><p class="audit-muted">新增节点将在下一次成功汇总后自动显示，通常约 2 分钟。</p>
+          <div id="node-list"></div>
+        </section>
+        <div id="node-detail">
+          <section class="audit-panel">
+            <h2 id="node-name"></h2><p id="node-meta" class="audit-muted"></p>
+            <div id="node-note-editor"></div>
+            <dl class="audit-metrics">
+              <div><dt>记录连接数</dt><dd id="connections">—</dd></div>
+              <div><dt>不同目标数</dt><dd id="targets">—</dd></div>
+              <div><dt>首次 / 最后记录</dt><dd id="range" class="audit-time">—</dd></div>
+            </dl>
+            <h3>每小时连接记录</h3><p class="audit-muted">不是在线时长、工作时长或聊天次数。虚线柱表示尚未到达的小时。</p>
+            <div id="hour-chart" class="hour-chart" aria-label="24 小时连接分布"></div>
+            <p id="hour-empty" class="audit-muted" hidden>旧报告未记录小时分布，无法补推。</p>
+          </section>
+          <section class="audit-panel">
+            <div class="audit-table-heading"><h2>目标域名 / IP</h2>
+              <label class="audit-search">筛选目标 / 服务 <input id="target-filter" type="search" maxlength="253" placeholder="域名、IP 或服务名称" autocomplete="off"></label></div>
+            <p class="audit-muted">服务名称均为本地规则推测，不证明使用了对应 App、正在聊天或观看视频。连接出现小时不是连续使用时长；共享 IP 不猜测网站。</p>
+            <p id="target-note" class="audit-muted"></p>
+            <div class="audit-table-scroll"><table>
+              <thead><tr><th scope="col">连接目标</th><th scope="col">疑似网站 / 服务</th><th scope="col">识别依据</th><th scope="col">记录次数</th><th scope="col">首次 / 最后</th><th scope="col">连接出现小时</th></tr></thead>
+              <tbody id="target-rows"></tbody>
+            </table></div>
+            <p id="target-empty" class="audit-muted" hidden>没有匹配记录；这不等于无人访问。</p>
+          </section>
+        </div>
+      </div>
+    </div>
+    <section class="audit-panel audit-mail"><h2>每日邮件</h2><p id="mail-status">状态读取中…</p>
+      <p class="audit-muted">沿用现有邮件任务。网页刷新不会发送邮件；SMTP 接收不等于已进入收件箱。</p></section>
+    <footer class="audit-muted audit-footer">仅覆盖经过本 VPS 且实际记录的连接，IP 不反查猜测网站。日志与汇总最多保留 7 天（北京时间：今天及前 6 天），超期自动清理；节点备注不受影响。历史节点名称来自保存时的日报；共用节点或变更端口会影响人员归属。节点未对应真实姓名时，不推断具体员工。</footer>
+  </main>
+</body>
+</html>

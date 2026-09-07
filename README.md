@@ -6,6 +6,9 @@
 
 - 每个本机入站分别设置上传、下载上限。
 - 新节点自动显示，默认不限速。
+- 每个节点独立备注（最多 200 字），刷新和重启后保留。
+- 可选网站连接审计：按日期和节点查看域名/IP、连接数、疑似服务和连接出现小时。
+- 审计记录与服务器日报最多保留 7 天；独立自动清理，超期网页查询被拒绝。
 - 最多同时限速 32 个节点；所有节点仍会显示。
 - 保留 SSH、3x-ui 面板和订阅端口的管理带宽。
 - 启用 Linux BBR 与 `fq`。
@@ -29,19 +32,27 @@
 线路带宽无法从虚拟网卡可靠判断，必须填写 VPS 套餐的实际 Mbps。下面示例是总线路 250 Mbps、管理保留 50 Mbps：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/skylucao/3x-ui-qos-manager/v1.0.0/install.sh \
+curl -fsSL https://raw.githubusercontent.com/skylucao/3x-ui-qos-manager/v1.1.0/install.sh \
   | sudo bash -s -- --yes --link-mbps 250 --reserve-mbps 50
 ```
 
 如果直接运行且不加 `--yes`，安装器会询问线路速度并展示变更计划：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/skylucao/3x-ui-qos-manager/v1.0.0/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/skylucao/3x-ui-qos-manager/v1.1.0/install.sh | sudo bash
 ```
 
 3x-ui 尚未安装时，会调用经过 SHA-256 校验的官方 `v3.7.0` 安装器，并固定安装 `v3.7.0`；它会生成随机账号、密码和访问路径。官方凭据保存在目标机的 `/etc/x-ui/install-result.env`。
 
-安装后，刷新 3x-ui，点击右下角的“网速管理”。
+安装后，刷新 3x-ui，点击右下角的“网速 / 审计”。网速控制和备注立即可用；**默认不启用访问日志、审计定时器或邮件**。
+
+## 可选网站连接审计
+
+审计附加组件与原面板共用登录，不需要单独打开网站。请先阅读 [审计安装与停用说明](docs/AUDIT.md)，告知使用者、在 3x-ui 中开启指定访问日志，并在需要发信时配置 SMTP；再明确执行附加安装命令。附加组件目前支持原生 Linux AMD64 Xray，不能直接用于 ARM 或 Docker。
+
+只处理连接目标域名/IP与时间，不采集网页正文、聊天消息、截图或键盘。疑似网站/服务由本地规则关联；连接出现小时不是网页使用时长，也不代表员工正在聊天或观看视频。
+
+数据最多保留北京时间今天及前 6 天（共 7 个自然日）。节点备注不随访问记录清理；已发送到收件邮箱的邮件不由服务器删除。
 
 ## 常用参数
 
@@ -71,6 +82,8 @@ sudo xui-qos-uninstall
 ```
 
 安装与卸载备份位于 `/var/backups/xui-qos/`。卸载会停止限速并恢复 3x-ui 原来的监听方式；过程失败时会自动恢复当前集成状态。BBR 配置会保留，因为它也是独立的系统网络优化。
+
+备注数据库 `/var/lib/xray-qos-web/node-notes.sqlite3` 在升级、回滚和卸载时保留。可选审计是独立组件，卸载 QoS 不会静默停止审计、邮件或日志清理；如需停止，请按照审计说明先关闭日志采集。
 
 ## 安全设计
 
