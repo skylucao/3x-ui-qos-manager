@@ -18,9 +18,9 @@ fi
 if [[ -z "$source_root" ]]; then
     temporary_root=$(mktemp -d /tmp/xui-audit-source.XXXXXXXX)
     curl -fsSL --retry 3 --connect-timeout 10 \
-        https://github.com/skylucao/3x-ui-qos-manager/archive/refs/tags/v1.1.0.tar.gz \
+        https://github.com/skylucao/3x-ui-qos-manager/archive/refs/tags/v1.2.0.tar.gz \
         -o "$temporary_root/source.tar.gz"
     tar -xzf "$temporary_root/source.tar.gz" -C "$temporary_root"
-    source_root="$temporary_root/3x-ui-qos-manager-1.1.0"
+    source_root="$temporary_root/3x-ui-qos-manager-1.2.0"
 fi
 python3 -B "$source_root/src/xray-audit/install_audit.py" "$@"

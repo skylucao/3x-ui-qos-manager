@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark"><meta name="csrf-token" content="__CSRF_TOKEN__">
+  <title>管理设置 · 节点管理</title>
+  <link rel="stylesheet" href="app.css"><link rel="stylesheet" href="settings.css">
+  <script src="settings.js" defer></script>
+</head>
+<body class="__BODY_CLASS__">
+  <main class="shell">
+    <header class="topbar"><div><p class="eyebrow">MANAGER SETTINGS</p><h1>管理设置</h1>
+      <p class="subtitle">线路带宽、日报时间与数据保留</p></div>
+      <button class="ghost-button" id="settings-refresh" type="button">重新载入设置</button></header>
+    <nav class="page-nav" aria-label="节点管理功能">
+      <a class="ghost-button" href="./">网速管理</a><a class="ghost-button" href="audit">网站连接审计</a>
+      <a class="ghost-button" href="settings" aria-current="page">管理设置</a>
+    </nav>
+    <p id="settings-status" role="status" aria-live="polite">正在读取设置…</p>
+    <section class="settings-panel">
+      <h2>线路总带宽</h2>
+      <p class="settings-hint">单位 Mbps。各节点上限仍在“网速管理”逐个修改；总带宽不能低于已保存的节点上限。</p>
+      <form id="line-form"><fieldset id="line-fields" disabled>
+        <div class="settings-fields">
+          <label for="line-mbps">总带宽 <input id="line-mbps" type="number" min="2" max="100000" step="1" required inputmode="numeric"></label>
+          <label for="reserve-mbps">管理预留 <input id="reserve-mbps" type="number" min="1" max="99999" step="1" required inputmode="numeric"></label>
+        </div>
+        <p class="settings-hint">管理预留必须小于总带宽；空闲带宽仍可共享。应用线路更改可能有短暂网络抖动，不重启 Xray。</p>
+        <button class="apply-button" type="submit">保存线路带宽</button>
+      </fieldset></form>
+    </section>
+    <section class="settings-panel">
+      <h2>每日邮件时间</h2>
+      <form id="mail-form"><fieldset id="mail-fields" disabled>
+        <label for="mail-time">发送时间（北京时间 / UTC+8） <input id="mail-time" type="time" required step="60"></label>
+        <p class="settings-hint">汇总前一天，各节点分段。新时间从下一次到点生效，不立即补发；已启动的日报不会被撤销，同一报告不会因改时间重复发送。</p>
+        <button class="apply-button" type="submit">保存发送时间</button>
+      </fieldset></form>
+      <p class="settings-hint" id="mail-settings-info"></p>
+      <p class="settings-hint">每分钟检查一次；清理占用或短暂离线后会延后处理。当日报告自动尝试一次，失败需管理员检查；SMTP 接收不等于送达收件箱。</p>
+    </section>
+    <section class="settings-panel"><h2>数据保留：2 天</h2>
+      <p>仅保留北京时间的今天和昨天。过期日期立即停止网页访问；日志、汇总和发信回执由每小时清理任务删除，停机时会延后。</p>
+      <p class="settings-hint">节点备注、限速设置不随审计日志删除。已发送到邮箱或手动导出的文件不受服务器清理控制。</p>
+    </section>
+  </main>
+</body>
+</html>

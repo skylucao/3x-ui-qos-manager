@@ -1018,6 +1018,59 @@ def show_status(as_json: bool) -> None:
         print("topology: current" if document["desired_signature"] == document["applied_signature"] else "topology: sync required")
 
 
+def line_revision(raw, profiles):
+    return hashlib.sha256(raw + b'\0' + json.dumps(profiles, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def write_line_config(raw):
+    trusted_regular_file(CONFIG_PATH)
+    fd, temporary = tempfile.mkstemp(prefix='.xray-qos-line-', dir=CONFIG_PATH.parent)
+    try:
+        with os.fdopen(fd, 'wb') as target:
+            os.fchmod(target.fileno(), 0o600)
+            target.write(raw); target.flush(); os.fsync(target.fileno())
+        os.replace(temporary, CONFIG_PATH)
+        directory = os.open(CONFIG_PATH.parent, os.O_DIRECTORY | os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def set_line(link, reserved, revision):
+    # Called under the same process-wide flock as node edits and topology sync.
+    if type(link) is not int or type(reserved) is not int or not 1 <= reserved < link <= 100000:
+        fail('invalid line bandwidth or management reserve')
+    config = load_config()
+    old = CONFIG_PATH.read_bytes()
+    profiles = read_profiles(config.profiles)
+    if revision != line_revision(old, profiles):
+        fail('line revision conflict')
+    if any(max(p['download_mbps'], p['upload_mbps']) > link for p in profiles['nodes'].values()):
+        fail('line bandwidth is below an existing node limit')
+    if (config.link_kbit, config.reserved_kbit) == (link * 1000, reserved * 1000):
+        return
+    lines = [line for line in old.decode().splitlines() if not re.match(r'^\s*(LINK_EGRESS|DEFAULT_RATE)\s*=', line)]
+    new = ('\n'.join(lines) + f'\nLINK_EGRESS={link}mbit\nDEFAULT_RATE={reserved}mbit\n').encode()
+    old_plan = build_plan(config, profiles, discover_inbounds(config.xui_db))
+    try:
+        write_line_config(new)
+        synchronize()
+    except BaseException as original:
+        errors = []
+        for recovery in (lambda: write_line_config(old), lambda: apply_transaction(old_plan, force=True)):
+            try:
+                recovery()
+            except BaseException as exc:
+                errors.append(str(exc))
+        if errors:
+            raise QosError('line update and recovery failed: ' + '; '.join(errors)) from original
+        raise
+
+
 def with_lock() -> Any:
     LOCK_PATH.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
     handle = LOCK_PATH.open("a+")
@@ -1045,6 +1098,10 @@ def main() -> int:
     set_parser.add_argument("download_mbps", type=int)
     set_parser.add_argument("upload_mbps", type=int)
     set_parser.add_argument("expected_revision", type=int)
+    line_parser = subparsers.add_parser('line')
+    line_parser.add_argument('link_mbps', type=int)
+    line_parser.add_argument('reserved_mbps', type=int)
+    line_parser.add_argument('expected_revision')
     arguments = parser.parse_args()
     command = arguments.command or "status"
     install_signal_handlers()
@@ -1070,6 +1127,9 @@ def main() -> int:
                     fail("; ".join(errors))
                 remove_state_file()
             print("xray-qos: limits removed; WAN fq restored")
+        elif command == 'line':
+            set_line(arguments.link_mbps, arguments.reserved_mbps, arguments.expected_revision)
+            print('{"ok":true}')
         elif command == "set":
             if arguments.inbound_id <= 0 or arguments.expected_revision < 0:
                 fail("invalid inbound id or revision")

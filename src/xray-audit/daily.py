@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 from mail_report import atomic_json
 from retention import cleanup_private, cutoff_date
+import schedule_config
 
 APP = Path(__file__).resolve().parent
 STATE = Path("/var/lib/xray-audit")
@@ -21,23 +22,56 @@ CONFIG = Path('/etc/xray-audit/config.json')
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
+def claim_scheduled(now, state=STATE):
+    if not schedule_config.due(now, schedule_config.read()):
+        return False
+    day = (now.date() - timedelta(days=1)).isoformat()
+    marker = state / 'last-scheduled.json'
+    if marker.exists():
+        prior = json.loads(marker.read_text())
+        if prior['report_date'] >= day:
+            return False
+    receipt = state / 'receipts' / (day + '.json')
+    if receipt.exists() and json.loads(receipt.read_text()).get('state') in ('accepted_by_smtp', 'sending', 'uncertain'):
+        return False
+    atomic_json(marker, {'report_date': day, 'attempted_at': now.isoformat()})
+    atomic_json(state / 'last-run.json', {'report_date': day, 'updated_at': now.isoformat(),
+                'generated': False, 'emailed': False, 'run_state': 'running'})
+    return True
+
+
+def bounded_run(command, **kwargs):
+    try:
+        return subprocess.run(command, **kwargs)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(command, 124)
+    except OSError:
+        return subprocess.CompletedProcess(command, 127)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", type=date.fromisoformat)
     parser.add_argument("--generate-only", action="store_true")
     parser.add_argument("--test-email", action="store_true")
+    parser.add_argument('--scheduled', action='store_true')
     args = parser.parse_args()
     os.umask(0o077)
-    config = json.loads(CONFIG.read_text(encoding="utf-8"))
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
     REPORTS.mkdir(parents=True, exist_ok=True, mode=0o700)
     (STATE / 'receipts').mkdir(parents=True, exist_ok=True, mode=0o700)
     with (STATE / "daily.lock").open("a") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | (fcntl.LOCK_NB if args.scheduled else 0))
+        except BlockingIOError:
+            return 0  # The next minute retries; never queue an in-flight job.
+        config = json.loads(CONFIG.read_text(encoding="utf-8"))
         now = datetime.now(SHANGHAI)
         day = args.date or (now.date() - timedelta(days=1))
-        retention = config.get('report_retention_days', 7)
+        retention = config.get('report_retention_days', 2)
         cleanup_private(now.date(), STATE, retention)
+        if args.scheduled and not claim_scheduled(now, STATE):
+            return 0
         if not args.test_email and not cutoff_date(now.date(), retention) <= day <= now.date():
             print('Requested report date is outside the retention window', file=sys.stderr)
             return 2
@@ -45,13 +79,13 @@ def main():
             body_file = STATE / "setup-test.txt"
             body_file.write_text(
                 "这是公司节点审计日报的发信测试。\n\n"
-                "计划：北京时间每天09:00发送前一天的汇总，各节点分段列出。\n"
+                "计划：按网页设置的北京时间发送前一天的汇总，各节点分段列出。\n"
                 "只汇总连接目标域名/IP和连接次数，不收集网页正文、聊天或视频内容。\n"
                 "本测试邮件不包含员工的访问记录。\n", encoding="utf-8")
             subject = "公司节点审计日报：发信测试"
             receipt = STATE / "receipts" / f"setup-{now.date().isoformat()}.json"
         else:
-            report_run = subprocess.run([
+            report_run = bounded_run([
                 sys.executable, str(APP / "report.py"), "--date", day.isoformat(),
                 "--log-dir", "/var/log/x-ui", "--xui-db", "/etc/x-ui/x-ui.db",
                 "--runtime-config", "/usr/local/x-ui/bin/config.json",
@@ -72,7 +106,7 @@ def main():
                 return 0
             subject = f"公司节点访问审计日报 {day.isoformat()}（按节点分组）"
             receipt = STATE / "receipts" / f"{day.isoformat()}.json"
-        send_run = subprocess.run([
+        send_run = bounded_run([
             sys.executable, str(APP / "mail_report.py"), "--xui-db", "/etc/x-ui/x-ui.db",
             "--recipient", config["recipient"], "--body-file", str(body_file),
             "--subject", subject, "--receipt", str(receipt),

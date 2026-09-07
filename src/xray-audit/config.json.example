@@ -1,6 +1,6 @@
 {
   "recipient": "owner@example.com",
   "timezone": "Asia/Shanghai",
-  "raw_log_retention_days": 7,
-  "report_retention_days": 7
+  "raw_log_retention_days": 2,
+  "report_retention_days": 2
 }

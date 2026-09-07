@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seven-calendar-day audit retention, independent of SMTP and report success."""
+"""Two-calendar-day audit retention, independent of SMTP and report success."""
 from datetime import date, datetime, timedelta
 import gzip
 import json
@@ -12,7 +12,7 @@ import tempfile
 
 from report import LOG_NAME_RE, MAX_LINE_LENGTH, REPORT_TIMEZONE, timezone_for
 
-MAX_DAYS = 7
+MAX_DAYS = 2
 STATE = Path('/var/lib/xray-audit')
 OUTPUT = Path('/var/lib/xray-audit-web')
 LOGS = Path('/var/log/x-ui')
@@ -28,7 +28,7 @@ def days(value=MAX_DAYS):
 
 
 def cutoff_date(today, retention=MAX_DAYS):
-    # Seven buckets, not today plus seven prior days.
+    # Today and yesterday: two calendar buckets, not a rolling 48-hour window.
     return today - timedelta(days=days(retention) - 1)
 
 
@@ -58,13 +58,14 @@ def cleanup_private(today, state=STATE, retention=MAX_DAYS):
     cutoff = cutoff_date(today, retention)
     result = {'reports_removed': cleanup_dates(state / 'reports', cutoff),
               'receipts_removed': cleanup_dates(state / 'receipts', cutoff, receipts=True)}
-    last = state / 'last-run.json'
-    if regular(last):
-        try:
-            if date.fromisoformat(json.loads(last.read_text())['report_date']) < cutoff:
-                last.unlink()
-        except (ValueError, KeyError, TypeError):
-            pass
+    for name in ('last-run.json', 'last-scheduled.json'):
+        last = state / name
+        if regular(last):
+            try:
+                if date.fromisoformat(json.loads(last.read_text())['report_date']) < cutoff:
+                    last.unlink()
+            except (ValueError, KeyError, TypeError):
+                pass
     return result
 
 

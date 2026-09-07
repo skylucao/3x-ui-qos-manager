@@ -1,0 +1,16 @@
+[Unit]
+Description=Local on-demand reverse DNS worker socket
+
+[Socket]
+ListenStream=/run/xray-audit-ptr.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=xray-qos-web
+Accept=yes
+MaxConnections=2
+TriggerLimitIntervalSec=60
+TriggerLimitBurst=120
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

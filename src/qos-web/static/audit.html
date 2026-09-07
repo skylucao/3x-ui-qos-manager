@@ -22,6 +22,7 @@
     <nav class="page-nav" aria-label="节点管理功能">
       <a class="ghost-button" href="./">网速管理</a>
       <a class="ghost-button" href="audit" aria-current="page">网站连接审计</a>
+      <a class="ghost-button" href="settings">管理设置</a>
     </nav>
     <section class="audit-notice" aria-label="统计范围">
       这里只能说明节点发生了连接，不能证明员工打开了网页或正在工作。包含应用后台连接和被阻断的连接；不采集网页正文、聊天内容、搜索词或完整 URL。
@@ -67,8 +68,8 @@
       </div>
     </div>
     <section class="audit-panel audit-mail"><h2>每日邮件</h2><p id="mail-status">状态读取中…</p>
-      <p class="audit-muted">沿用现有邮件任务。网页刷新不会发送邮件；SMTP 接收不等于已进入收件箱。</p></section>
-    <footer class="audit-muted audit-footer">仅覆盖经过本 VPS 且实际记录的连接，IP 不反查猜测网站。日志与汇总最多保留 7 天（北京时间：今天及前 6 天），超期自动清理；节点备注不受影响。历史节点名称来自保存时的日报；共用节点或变更端口会影响人员归属。节点未对应真实姓名时，不推断具体员工。</footer>
+      <p class="audit-muted"><a href="settings">修改每日发送时间</a>。网页刷新不会发送邮件；SMTP 接收不等于已进入收件箱。</p></section>
+    <footer class="audit-muted audit-footer">仅覆盖经过本 VPS 且实际记录的连接。公网 IP 可按需反查 PTR，结果只是参考主机名，不证明实际浏览网站；查询使用服务器的 DNS 服务。日志与汇总最多保留 2 天（北京时间：今天和昨天），超期自动清理；节点备注不受影响。已发邮件和手动导出不在服务器清理范围。历史节点名称来自保存时的日报；共用节点或变更端口会影响人员归属。节点未对应真实姓名时，不推断具体员工。</footer>
   </main>
 </body>
 </html>

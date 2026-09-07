@@ -1,0 +1,30 @@
+[Unit]
+Description=Unprivileged single reverse DNS lookup
+CollectMode=inactive-or-failed
+
+[Service]
+Type=exec
+DynamicUser=yes
+ExecStart=/usr/bin/python3 -B /opt/xray-qos-web/ptr_lookup.py
+StandardInput=socket
+StandardOutput=socket
+StandardError=null
+RuntimeMaxSec=6
+TimeoutStartSec=6
+TimeoutStopSec=1
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+TasksMax=8
+MemoryMax=32M

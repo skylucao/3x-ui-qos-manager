@@ -18,6 +18,7 @@ import struct
 import subprocess
 import threading
 import time
+import schedule_config
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -703,6 +704,65 @@ class QosState:
 STATE = QosState()
 
 
+def settings_status():
+    config = read_config()
+    profiles = read_profiles(config['profiles'])
+    revision = hashlib.sha256(CONFIG_PATH.read_bytes() + b'\0' + json.dumps(profiles, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    enabled = Path('/opt/xray-audit/.managed-by-codex-audit').is_file()
+    return {'ok': True, 'line': {'link_mbps': display_number(config['link_mbps']),
+            'reserved_mbps': display_number(config['reserved_mbps']), 'revision': revision},
+            'mail': {**schedule_config.read(), 'enabled': enabled}, 'retention_days': 2, 'timezone': 'Asia/Shanghai'}
+
+
+def change_settings(request):
+    fields = {'v', 'op', 'section', 'expected_revision'}
+    section = request.get('section')
+    fields |= {'link_mbps', 'reserved_mbps'} if section == 'line' else {'time'}
+    if section not in ('line', 'mail') or set(request) != fields:
+        raise ControllerError('invalid', '请求字段不正确')
+    revision = request['expected_revision']
+    if not isinstance(revision, str) or not re.fullmatch(r'[a-f0-9]{64}', revision):
+        raise ControllerError('invalid', '设置版本无效')
+    if not STATE.operation_lock.acquire(blocking=False):
+        raise ControllerError('busy', '控制器正忙，请稍后再试')
+    try:
+        import fcntl
+        with Path('/run/lock/xui-qos-install.lock').open('a') as install_lock:
+            try:
+                fcntl.flock(install_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise ControllerError('busy', '安装或升级正在进行，请稍后再试') from None
+            current = settings_status()
+            if current[section]['revision'] != revision:
+                raise ControllerError('conflict', '设置已被其他页面修改，请重新载入')
+            if section == 'mail':
+                if not current['mail']['enabled']:
+                    raise ControllerError('invalid', '尚未安装并启用审计附加组件')
+                try:
+                    schedule_config.save(request['time'], revision)
+                except ValueError as exc:
+                    raise ControllerError('invalid', str(exc)) from None
+                except FileExistsError:
+                    raise ControllerError('conflict', '设置已更新，请重新载入') from None
+            else:
+                link, reserve = request['link_mbps'], request['reserved_mbps']
+                if type(link) is not int or type(reserve) is not int or not 1 <= reserve < link <= 100000:
+                    raise ControllerError('invalid', '带宽须为整数，且 1 ≤ 管理预留 < 总带宽 ≤ 100000 Mbps')
+                profiles = read_profiles(read_config()['profiles'])
+                if any(max(p['download_mbps'], p['upload_mbps']) > link for p in profiles['nodes'].values()):
+                    raise ControllerError('invalid', '总带宽不能低于已保存的节点上限；请先调整节点限速')
+                code, stdout, stderr, timed_out = run_qos(['line', str(link), str(reserve), revision], timeout=90)
+                if timed_out or code:
+                    if 'line revision conflict' in stderr:
+                        raise ControllerError('conflict', '节点或线路设置已改变，请重新载入')
+                    LOG.error('LINE_SAVE_FAILED timed_out=%s code=%s', timed_out, code)
+                    raise ControllerError('failed', '线路应用未能确认，请重新载入并检查控制器状态')
+                STATE.previous = {}
+            return settings_status()
+    finally:
+        STATE.operation_lock.release()
+
+
 def read_request(conn: socket.socket) -> dict[str, Any]:
     conn.settimeout(4)
     chunks = bytearray()
@@ -742,6 +802,13 @@ def response_for(request: dict[str, Any]) -> dict[str, Any]:
                 "nodes": [{key: node[key] for key in ("inbound_id", "port", "protocol")} for node in nodes]}
     if request["op"] == "set":
         return STATE.set_limit(request)
+    if request['op'] == 'settings':
+        if set(request) != {'v', 'op'}:
+            raise ControllerError('invalid', '请求字段不正确')
+        with STATE.operation_lock:
+            return settings_status()
+    if request['op'] == 'settings_set':
+        return change_settings(request)
     raise ControllerError("invalid", "不支持的操作")
 
 

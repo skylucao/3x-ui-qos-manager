@@ -33,7 +33,7 @@ def read(name, root=ROOT):
     if name != 'index.json' and not re.fullmatch(r'\d{4}-\d{2}-\d{2}\.json', name):
         raise ValueError('invalid filename')
     current = today()
-    cutoff = current - timedelta(days=6)
+    cutoff = current - timedelta(days=1)
     if name != 'index.json' and not cutoff <= date.fromisoformat(name[:-5]) <= current:
         raise FileNotFoundError('Report is outside the retention window')
     with READ_LOCK:
@@ -56,7 +56,7 @@ def read(name, root=ROOT):
         if name == 'index.json' and 'dates' in data:
             # Enforce visibility even while the periodic disk cleanup is delayed.
             data['dates'] = [entry for entry in data['dates'] if cutoff <= date.fromisoformat(entry['report_date']) <= current]
-            data['retention_days'] = 7
+            data['retention_days'] = 2
             data['earliest_date'] = cutoff.isoformat()
             if data.get('mail', {}).get('report_date') and date.fromisoformat(data['mail']['report_date']) < cutoff:
                 data['mail'] = {'state': 'not_run', 'report_date': None, 'schedule': data['mail'].get('schedule', '')}

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0
+
+- Embedded Manager Settings for total line bandwidth, management reserve and daily mail time (Asia/Shanghai).
+- Versioned line updates serialized with node changes, preserving node caps and restoring configuration/tc on failure.
+- On-demand PTR reference lookup for retained, observed public IPs through a separate unprivileged socket-activated worker.
+- Two-calendar-date retention for logs, reports, cached views and delivery receipts.
+- Configurable schedule with future activation, lock-contention recovery and one automatic attempt per report date.
+- Authentication, schedule, PTR, retention and line-rollback tests; preserve mail schedule during QoS uninstall.
+
 ## 1.1.0
 
 - Persistent per-node notes with versioned saves, 200-character limit, and existing-session/CSRF checks.

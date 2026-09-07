@@ -36,7 +36,7 @@
   }
   function mail() {
     const value = catalog.mail;
-    const states = { not_run: '尚无运行记录', generated_only: '最近仅生成汇总，未请求发信；不代表邮件失败', smtp_accepted: '最近日报已由 SMTP 接收', failed: '最近日报生成或发信失败，需要检查', unknown: '暂时无法确认运行状态' };
+    const states = { running: '日报正在生成或发送', not_run: '尚无运行记录', generated_only: '最近仅生成汇总，未请求发信；不代表邮件失败', smtp_accepted: '最近日报已由 SMTP 接收', failed: '最近日报生成或发信失败，需要检查', unknown: '暂时无法确认运行状态' };
     $('mail-status').textContent = `${value.schedule}。${states[value.state] || states.unknown}${value.report_date ? `（报告日期 ${value.report_date}）` : ''}。`;
   }
   function targets(node) {
@@ -58,7 +58,30 @@
         } catch (_) { /* Invalid provenance is never opened. */ }
       }
       const hours = item.hourly_connections ? item.hourly_connections.map((n, h) => n ? `${String(h).padStart(2, '0')}时（${number(n)}条）` : '').filter(Boolean).join('、') : '旧报告未记录，不能按首末时间补推';
-      row.append(el('td', item.destination + (item.kind === 'ip' ? '（IP）' : '')), service, basis, el('td', number(item.connections)), el('td', `${clock(item.first_seen)} / ${clock(item.last_seen)}`), el('td', hours));
+      const target = el('td', item.destination + (item.kind === 'ip' ? '（IP）' : ''));
+      if (item.kind === 'ip') {
+        const button = el('button', '反查 IP', 'ghost-button'); button.type = 'button';
+        const reference = el('small', '按需查询 PTR，不用于判定网站', 'audit-service-meta');
+        const day = current.report_date, key = selectedKey;
+        button.addEventListener('click', async () => {
+          button.disabled = true; reference.textContent = '正在反查…';
+          try {
+            const response = await fetch('api/audit/ptr', { method: 'POST', credentials: 'same-origin', cache: 'no-store',
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content },
+              body: JSON.stringify({ date: day, ip: item.destination }), signal: AbortSignal.timeout(10000) });
+            if (response.status === 401 || response.status === 403 || response.redirected) throw new Error('请重新登录后查询');
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message || '查询暂不可用');
+            if (!target.isConnected || current?.report_date !== day || selectedKey !== key) return;
+            const messages = { not_found: '未查到 PTR 记录', timeout: 'DNS 查询超时', unavailable: '反查服务暂不可用', busy: '查询繁忙，请稍后重试' };
+            reference.textContent = result.status === 'found' ? `参考主机名：${result.hostname}（不代表访问的网站）` : messages[result.status] || '未查到';
+          } catch (error) {
+            if (target.isConnected && current?.report_date === day && selectedKey === key) reference.textContent = error.name === 'TimeoutError' ? '查询超时，请稍后重试' : error.message;
+          } finally { button.disabled = false; }
+        });
+        target.append(el('br', ''), button, reference);
+      }
+      row.append(target, service, basis, el('td', number(item.connections)), el('td', `${clock(item.first_seen)} / ${clock(item.last_seen)}`), el('td', hours));
       return row;
     }));
     $('target-empty').hidden = !!items.length;

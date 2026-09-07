@@ -27,6 +27,7 @@ from urllib.parse import urlsplit
 
 import audit_view
 import node_notes
+import ptr_lookup
 
 
 BIND = os.environ.get("QOS_WEB_BIND", "127.0.0.1")
@@ -71,6 +72,8 @@ STATIC_TYPES = {
     "audit.css": "text/css; charset=utf-8",
     "notes.js": "application/javascript; charset=utf-8",
     "notes.css": "text/css; charset=utf-8",
+    "settings.js": "application/javascript; charset=utf-8",
+    "settings.css": "text/css; charset=utf-8",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -440,12 +443,14 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.close_connection = True
             return
-        if path in (path_for(), path_for("audit")):
+        if path in (path_for(), path_for("audit"), path_for('settings')):
             session_data = self.current_session()
-            if path == path_for("audit") and not session_data:
+            if path != path_for() and not session_data:
                 self.send_error_json(HTTPStatus.UNAUTHORIZED, "请先登录 3x-ui 或节点管理页面")
                 return
             filename = ("audit.html" if path == path_for("audit") else "dashboard.html") if session_data else "login.html"
+            if path == path_for('settings'):
+                filename = 'settings.html'
             try:
                 text = (STATIC_DIR / filename).read_text(encoding="utf-8")
             except OSError:
@@ -486,12 +491,15 @@ class Handler(BaseHTTPRequestHandler):
             if path == path_for(name):
                 self.send_static(name)
                 return
-        if path == path_for("api/status"):
+        if path in (path_for("api/status"), path_for('api/settings')):
             if self.current_session() is None:
                 self.send_error_json(HTTPStatus.UNAUTHORIZED, "请先登录")
                 return
             try:
-                result = control_request({"v": 1, "op": "status"})
+                if urlsplit(self.path).query:
+                    self.send_error_json(HTTPStatus.BAD_REQUEST, '此请求不接受查询参数')
+                    return
+                result = control_request({"v": 1, "op": "settings" if path == path_for('api/settings') else "status"})
             except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
                 LOG.exception("CONTROL_STATUS_FAIL")
                 self.send_error_json(HTTPStatus.SERVICE_UNAVAILABLE, "限速控制器暂不可用")
@@ -539,7 +547,41 @@ class Handler(BaseHTTPRequestHandler):
         if path == path_for("api/notes"):
             self.handle_note()
             return
+        if path in (path_for('api/settings'), path_for('api/audit/ptr')):
+            self.handle_extra(path)
+            return
         self.send_error_json(HTTPStatus.NOT_FOUND, "页面不存在")
+
+    def handle_extra(self, path):
+        if self.require_session_and_csrf() is None:
+            return
+        if urlsplit(self.path).query:
+            self.send_error_json(HTTPStatus.BAD_REQUEST, '此请求不接受查询参数')
+            return
+        payload = self.read_json()
+        if payload is None:
+            return
+        try:
+            if path == path_for('api/audit/ptr'):
+                if set(payload) != {'date', 'ip'} or not isinstance(payload['date'], str):
+                    raise ValueError('invalid fields')
+                day = audit_view.requested_date('date=' + payload['date'])
+                result = {'ok': True, **ptr_lookup.lookup(day, payload['ip'], audit_view.read)}
+            else:
+                if set(payload) not in ({'section', 'expected_revision', 'link_mbps', 'reserved_mbps'}, {'section', 'expected_revision', 'time'}):
+                    raise ValueError('invalid fields')
+                result = control_request({**payload, 'v': 1, 'op': 'settings_set'})
+        except FileNotFoundError:
+            self.send_error_json(HTTPStatus.NOT_FOUND, '该目标不在保留期内的汇总中')
+            return
+        except (ValueError, TypeError, KeyError):
+            self.send_error_json(HTTPStatus.BAD_REQUEST, '请求参数无效；反查仅支持已记录的公网单播 IP')
+            return
+        except (OSError, RuntimeError):
+            self.send_error_json(HTTPStatus.SERVICE_UNAVAILABLE, '服务暂不可用，请重新载入核对后再试')
+            return
+        status = HTTPStatus.OK if result.get('ok') else {'invalid': 400, 'conflict': 409, 'busy': 429}.get(result.get('code'), 503)
+        self.send_json(status, result)
 
     def handle_note(self) -> None:
         if self.require_session_and_csrf() is None:

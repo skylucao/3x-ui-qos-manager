@@ -1,0 +1,10 @@
+.settings-panel { padding: 24px; margin: 18px 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.settings-panel h2 { margin-top: 0; font-size: 21px; }
+.settings-panel fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.settings-fields { display: flex; gap: 24px; flex-wrap: wrap; }
+.settings-panel label { display: flex; flex-direction: column; gap: 10px; max-width: 350px; }
+.settings-panel input { background: var(--panel-deep); color: var(--text); border: 1px solid var(--line-bright); border-radius: 8px; padding: 10px 12px; width: 100%; min-width: 150px; }
+.settings-hint { color: var(--muted); line-height: 1.7; }
+.settings-panel input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.settings-panel fieldset:disabled { opacity: .6; }
+#settings-status { min-height: 1.6em; }

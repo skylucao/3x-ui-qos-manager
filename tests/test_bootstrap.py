@@ -43,7 +43,7 @@ class BootstrapTests(unittest.TestCase):
     def test_stdin_reaches_default_release_download(self):
         result = self.run_bootstrap()
         self.assertEqual(result.returncode, 97, result.stderr)
-        self.assertIn("/archive/refs/tags/v1.1.0.tar.gz", result.stdout)
+        self.assertIn("/archive/refs/tags/v1.2.0.tar.gz", result.stdout)
         self.assertNotIn("unbound variable", result.stderr)
 
     def test_override_repository_and_ref(self):

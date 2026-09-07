@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install optional audit services after the administrator configures logging."""
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 import fcntl
 import json
 import os
@@ -13,6 +13,7 @@ import tempfile
 
 from mail_report import address
 from report import timezone_for, REPORT_TIMEZONE
+import schedule_config
 
 HERE = Path(__file__).resolve().parent
 APP = Path('/opt/xray-audit')
@@ -20,9 +21,9 @@ CONFIG = Path('/etc/xray-audit')
 STATE = Path('/var/lib/xray-audit')
 OUTPUT = Path('/var/lib/xray-audit-web')
 UNIT = Path('/etc/systemd/system')
-PROGRAMS = ('report.py', 'service_rules.py', 'snapshot.py', 'retention.py', 'daily.py', 'mail_report.py', 'reopen_logger.py')
-UNITS = tuple('xray-audit-' + task + extension for task in ('daily', 'logrotate', 'snapshot') for extension in ('.service', '.timer'))
-TIMERS = tuple(unit for unit in UNITS if unit.endswith('.timer'))
+PROGRAMS = ('report.py', 'service_rules.py', 'snapshot.py', 'retention.py', 'daily.py', 'mail_report.py', 'reopen_logger.py', 'schedule_config.py')
+UNITS = tuple('xray-audit-' + task + extension for task in ('daily', 'logrotate', 'snapshot') for extension in ('.service', '.timer')) + ('xray-audit-ptr.socket', 'xray-audit-ptr@.service')
+TIMERS = tuple(unit for unit in UNITS if unit.endswith(('.timer', '.socket')))
 
 
 def validate_runtime(runtime):
@@ -99,9 +100,9 @@ def install(recipient):
         raise ValueError('Existing audit units are not managed')
     if OUTPUT.exists() and not (OUTPUT / '.managed-by-xray-audit-web').is_file():
         raise ValueError('Existing export directory is not managed')
-    for name in ('audit_view.py', 'node_notes.py'):
+    for name in ('audit_view.py', 'node_notes.py', 'schedule_config.py', 'ptr_lookup.py'):
         if not (Path('/opt/xray-qos-web') / name).is_file():
-            raise ValueError('Install QoS Manager v1.1.0 or newer first')
+            raise ValueError('Install QoS Manager v1.2.0 or newer first')
     web = pwd.getpwnam('xray-qos-web')
     if not shutil.which('logrotate'):
         raise ValueError('Install logrotate first: apt-get install logrotate')
@@ -121,8 +122,15 @@ def install(recipient):
     config_path = CONFIG / 'config.json'
     safe_path(config_path)
     config = json.loads(config_path.read_text()) if config_path.exists() else {}
-    config.update(recipient=recipient, timezone=REPORT_TIMEZONE, raw_log_retention_days=7, report_retention_days=7)
+    config.update(recipient=recipient, timezone=REPORT_TIMEZONE, raw_log_retention_days=2, report_retention_days=2)
     targets[config_path] = ((json.dumps(config, indent=2) + '\n').encode(), 0o600)
+    if not schedule_config.PATH.exists():
+        now = datetime.now(schedule_config.SHANGHAI)
+        first = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        if first <= now:
+            first += timedelta(days=1)
+        initial_schedule = {'version': 1, 'time': '09:00', 'effective_from': int(first.timestamp())}
+        targets[schedule_config.PATH] = ((json.dumps(initial_schedule) + '\n').encode(), 0o600)
     for path in targets:
         safe_path(path)
     # Only application/configuration backups; no copies of expiring audit data.
@@ -174,7 +182,7 @@ def install(recipient):
                 subprocess.run(['systemctl', 'start', unit], capture_output=True)
         print('Previous application files restored; audit state retained. Backup:', backup)
         raise
-    print('Audit installed: seven Shanghai calendar dates; mail at 09:00 after SMTP is configured.')
+    print('Audit installed: two Shanghai calendar dates; mail time is editable in Manager Settings.')
     print('No test email was sent. Xray was not restarted. Backup:', backup)
 
 

@@ -30,6 +30,7 @@ jobs:
           python -B -m unittest discover -s src/qos-web -p 'test_*.py'
           python -B tests/test_release_integration.py
           node src/qos-web/test_notes_ui.cjs
+          node src/qos-web/test_settings_ui.cjs
       - name: Shell syntax
         run: |
           bash -n install.sh

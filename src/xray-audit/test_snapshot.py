@@ -151,7 +151,7 @@ class PublicationTests(unittest.TestCase):
         self.assertTrue((self.state / 'reports' / '2026-01-01.json').exists())
         self.assertTrue((self.output / 'keep.json').exists())
 
-    def test_exactly_seven_dates_even_when_current_generation_fails(self):
+    def test_exactly_two_dates_even_when_current_generation_fails(self):
         for age in range(9):
             day = (self.now - timedelta(days=age)).date().isoformat()
             snapshot.atomic_json(self.output / (day + '.json'), snapshot.project(source(day), 'live'))
@@ -159,8 +159,8 @@ class PublicationTests(unittest.TestCase):
             raise ValueError('failed current generation')
         self.assertFalse(self.publish(broken))
         index = snapshot.read_json(self.output / 'index.json')
-        self.assertEqual(len(index['dates']), 7)
-        self.assertEqual(index['earliest_date'], '2026-09-01')
+        self.assertEqual(len(index['dates']), 2)
+        self.assertEqual(index['earliest_date'], '2026-09-06')
         self.assertFalse((self.output / '2026-08-31.json').exists())
 
     def test_mail_not_changed_by_publication(self):

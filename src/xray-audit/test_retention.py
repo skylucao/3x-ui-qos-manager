@@ -20,21 +20,21 @@ class RetentionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.today = date(2026, 9, 7)
-        self.cutoff = date(2026, 9, 1)
+        self.cutoff = date(2026, 9, 6)
 
     def test_boundaries_and_capped_configuration(self):
         self.assertEqual(retention.cutoff_date(self.today), self.cutoff)
-        self.assertEqual(retention.cutoff_date(date(2027, 1, 1)), date(2026, 12, 26))
-        self.assertEqual(retention.cutoff_date(date(2028, 3, 1)), date(2028, 2, 24))
+        self.assertEqual(retention.cutoff_date(date(2027, 1, 1)), date(2026, 12, 31))
+        self.assertEqual(retention.cutoff_date(date(2028, 3, 1)), date(2028, 2, 29))
         for value in (30, 90, None, 'invalid'):
             self.assertEqual(retention.cutoff_date(self.today, value), self.cutoff)
         self.assertEqual(retention.cutoff_date(self.today, 1), self.today)
 
     def test_dates_only_delete_owned_expired_files(self):
-        for name in ('2026-08-31.json', '2026-08-31.txt', '2026-09-01.json', 'node-notes.sqlite3', 'keep.json', '2026-02-30.json', 'setup-2026-08-31.json'):
+        for name in ('2026-08-31.json', '2026-08-31.txt', '2026-09-06.json', 'node-notes.sqlite3', 'keep.json', '2026-02-30.json', 'setup-2026-08-31.json'):
             (self.root / name).write_text('{}')
         self.assertEqual(retention.cleanup_dates(self.root, self.cutoff), 2)
-        self.assertTrue((self.root / '2026-09-01.json').exists())
+        self.assertTrue((self.root / '2026-09-06.json').exists())
         self.assertTrue((self.root / 'node-notes.sqlite3').exists())
         self.assertTrue((self.root / 'setup-2026-08-31.json').exists())
         self.assertEqual(retention.cleanup_dates(self.root, self.cutoff, receipts=True), 1)
@@ -44,7 +44,7 @@ class RetentionTests(unittest.TestCase):
             folder = self.root / name
             folder.mkdir()
             (folder / '2026-08-31.json').write_text('{}')
-            (folder / '2026-09-01.json').write_text('{}')
+            (folder / '2026-09-06.json').write_text('{}')
         (self.root / 'last-run.json').write_text(json.dumps({'report_date': '2026-08-31'}))
         (self.root / 'metadata.json').write_text('{}')
         result = retention.cleanup_private(self.today, self.root)
@@ -53,7 +53,7 @@ class RetentionTests(unittest.TestCase):
         self.assertTrue((self.root / 'metadata.json').exists())
 
     def test_mixed_plain_and_compressed_records_keep_boundary_and_duplicates(self):
-        valid = event('2026-09-01') + event('2026-09-07') * 2
+        valid = event('2026-09-06') + event('2026-09-07') * 2
         original = event('2026-08-31') + valid + b'undated\n' + event('2026-09-08')
         for name in ('access.log.1', 'access.log.2.gz'):
             with self.subTest(name=name):
@@ -82,7 +82,7 @@ class RetentionTests(unittest.TestCase):
 
     def test_atomic_failure_keeps_original_and_cleans_temp(self):
         path = self.root / 'access.log.1'
-        payload = event('2026-08-31') + event('2026-09-01')
+        payload = event('2026-08-31') + event('2026-09-06')
         path.write_bytes(payload)
         with patch.object(retention.os, 'replace', side_effect=OSError('failure')):
             with self.assertRaises(OSError):
@@ -112,7 +112,7 @@ class RetentionTests(unittest.TestCase):
 
     def test_active_mixed_file_rotated_before_pruning(self):
         active = self.root / 'access.log'
-        active.write_bytes(event('2026-08-31') + event('2026-09-01'))
+        active.write_bytes(event('2026-08-31') + event('2026-09-06'))
         def rotate(command, **kwargs):
             if '--force' in command:
                 active.rename(self.root / 'access.log.1')
@@ -120,7 +120,7 @@ class RetentionTests(unittest.TestCase):
         with patch.object(retention, 'LOGS', self.root), patch.object(retention, 'ensure_closed'), patch.object(retention.subprocess, 'run', side_effect=rotate) as run:
             self.assertEqual(retention.maintain_logs(self.today), 1)
             self.assertEqual(run.call_count, 2)
-        self.assertEqual((self.root / 'access.log.1').read_bytes(), event('2026-09-01'))
+        self.assertEqual((self.root / 'access.log.1').read_bytes(), event('2026-09-06'))
         self.assertEqual(active.read_bytes(), b'')
 
     @unittest.skipIf(os.name == 'nt', 'POSIX symlink support')
@@ -176,8 +176,8 @@ class DailyRetentionTests(unittest.TestCase):
                 with patch.object(daily, 'STATE', state), patch.object(daily, 'REPORTS', reports), patch.object(daily, 'CONFIG', config), patch.object(sys, 'argv', argv), patch.object(daily, 'datetime') as clock, patch.object(daily.subprocess, 'run', side_effect=run):
                     clock.now.return_value = datetime.fromisoformat('2026-09-07T09:00:00+08:00')
                     if mode == 'smtp_timeout':
-                        with self.assertRaises(subprocess.TimeoutExpired):
-                            daily.main()
+                        self.assertEqual(daily.main(), 124)
+                        self.assertEqual(json.loads((state / 'last-run.json').read_text())['mail_exit_code'], 124)
                     else:
                         self.assertEqual(daily.main(), 0 if mode == 'generate_only' else 1)
                 self.assertFalse(old.exists())

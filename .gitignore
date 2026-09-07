@@ -21,6 +21,8 @@ reports/
 receipts/
 metadata.json
 last-run.json
+last-scheduled.json
+daily-schedule.json
 src/xray-audit/config.json
 install-result.env
 backup/

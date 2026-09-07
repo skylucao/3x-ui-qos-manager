@@ -4,9 +4,9 @@ set -Eeuo pipefail
 umask 077
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-VERSION=1.1.0
+VERSION=1.2.0
 DEFAULT_REPOSITORY="skylucao/3x-ui-qos-manager"
-DEFAULT_RELEASE_REF="v1.1.0"
+DEFAULT_RELEASE_REF="v1.2.0"
 XUI_INSTALLER_REF="v3.7.0"
 XUI_INSTALLER_SHA256="a7f4fedcea3abe8987508d00f29834b8872e4e4e5059159eb19460d474b37cdc"
 
@@ -169,6 +169,8 @@ for required_file in \
     src/qos-web/web.py \
     src/qos-web/audit_view.py \
     src/qos-web/node_notes.py \
+    src/qos-web/schedule_config.py \
+    src/qos-web/ptr_lookup.py \
     src/qos-web/healthcheck.py \
     src/qos-web/static/dashboard.html \
     src/qos-web/static/xui-qos-integration.js \
@@ -566,6 +568,8 @@ install -o root -g root -m 0755 "$source_root/src/qos-web/web.py" /opt/xray-qos-
 install -o root -g root -m 0755 "$source_root/src/qos-web/healthcheck.py" /opt/xray-qos-web/healthcheck.py
 install -o root -g root -m 0644 "$source_root/src/qos-web/audit_view.py" /opt/xray-qos-web/audit_view.py
 install -o root -g root -m 0644 "$source_root/src/qos-web/node_notes.py" /opt/xray-qos-web/node_notes.py
+install -o root -g root -m 0644 "$source_root/src/qos-web/schedule_config.py" /opt/xray-qos-web/schedule_config.py
+install -o root -g root -m 0644 "$source_root/src/qos-web/ptr_lookup.py" /opt/xray-qos-web/ptr_lookup.py
 # Notes are independent application state: preserve them on upgrade/rollback.
 [[ ! -L /var/lib/xray-qos-web ]] || die "notes directory must not be a symlink"
 if [[ -e /var/lib/xray-qos-web ]]; then
@@ -750,6 +754,8 @@ chmod 0600 /etc/xray-qos-web/install-result.env
     /opt/xray-qos-web/web.py \
     /opt/xray-qos-web/audit_view.py \
     /opt/xray-qos-web/node_notes.py \
+    /opt/xray-qos-web/schedule_config.py \
+    /opt/xray-qos-web/ptr_lookup.py \
     /opt/xray-qos-web/healthcheck.py
 nginx -t
 

@@ -38,8 +38,8 @@ class ReleaseIntegrationTests(unittest.TestCase):
         self.assertNotIn('activate_logging.py', installer)
         config = json.loads((ROOT / 'src/xray-audit/config.json.example').read_text(encoding='utf-8'))
         self.assertEqual(config['recipient'], 'owner@example.com')
-        self.assertEqual(config['report_retention_days'], 7)
-        self.assertEqual(config['raw_log_retention_days'], 7)
+        self.assertEqual(config['report_retention_days'], 2)
+        self.assertEqual(config['raw_log_retention_days'], 2)
 
     @unittest.skipIf(os.name == 'nt', 'Optional installer requires Linux fcntl')
     def test_audit_installer_requires_explicit_notice_before_mutation(self):
@@ -64,6 +64,24 @@ class ReleaseIntegrationTests(unittest.TestCase):
             installer.validate_runtime(runtime)
         for name in installer.PROGRAMS + installer.UNITS:
             self.assertTrue((ROOT / 'src/xray-audit' / name).is_file(), name)
+
+
+class SettingsIntegrationTests(unittest.TestCase):
+    def test_schedule_preserved_on_uninstall_and_ptr_stopped(self):
+        uninstall = (ROOT / 'scripts/uninstall.sh').read_text()
+        self.assertNotIn('rm -rf -- /opt/xray-qos-web /etc/xray-qos-web /etc/xray-qos', uninstall)
+        self.assertIn('systemctl stop xray-audit-ptr.socket', uninstall)
+        self.assertIn('rmdir -- /etc/xray-qos', uninstall)
+        self.assertIn('PTR_WAS_ACTIVE', (ROOT / 'scripts/rollback-install.sh').read_text())
+
+    def test_schedule_timer_gates_in_runner(self):
+        timer = (ROOT / 'src/xray-audit/xray-audit-daily.timer').read_text()
+        self.assertIn('OnCalendar=*-*-* *:*:00 Asia/Shanghai', timer)
+        self.assertIn('Persistent=false', timer)
+        self.assertIn('daily.py --scheduled', (ROOT / 'src/xray-audit/xray-audit-daily.service').read_text())
+        installer = (ROOT / 'install.sh').read_text()
+        for name in ('schedule_config.py', 'ptr_lookup.py'):
+            self.assertIn('"$source_root/src/qos-web/' + name + '"', installer)
 
 
 if __name__ == '__main__':

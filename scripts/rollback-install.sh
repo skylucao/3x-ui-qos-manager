@@ -110,6 +110,12 @@ fi
 if [[ "${WEB_WAS_ACTIVE:-no}" == yes ]]; then
     systemctl start xray-qos-web.service || rollback_errors=1
 fi
+if [[ "${PTR_WAS_ENABLED:-no}" == yes ]]; then
+    systemctl enable xray-audit-ptr.socket >/dev/null 2>&1 || true
+fi
+if [[ "${PTR_WAS_ACTIVE:-no}" == yes ]]; then
+    systemctl start xray-audit-ptr.socket || rollback_errors=1
+fi
 
 if (( rollback_errors != 0 )); then
     fail "rollback completed with errors; inspect systemd status"

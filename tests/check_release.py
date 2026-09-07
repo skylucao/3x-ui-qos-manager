@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FORBIDDEN_NAMES = {"web.env", "nodes.json", "install-result.env", "metadata.json", "last-run.json", "node-notes.sqlite3"}
+FORBIDDEN_NAMES = {"web.env", "nodes.json", "install-result.env", "metadata.json", "last-run.json", "last-scheduled.json", "daily-schedule.json", "node-notes.sqlite3"}
 FORBIDDEN_SUFFIXES = {".pyc", ".tgz", ".zip", ".gz", ".db", ".sqlite", ".sqlite3", ".pem", ".key", ".cer", ".crt"}
 SECRET_PATTERNS = {
     "private key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),

@@ -147,13 +147,16 @@ def reclassify_cache(cached):
     return True
 
 
-def mail_status(state):
-    summary = {'schedule': '北京时间每天 09:00，汇总前一天；各节点分段', 'state': 'not_run', 'report_date': None}
+def mail_status(state, daily_time='09:00'):
+    summary = {'schedule': f'北京时间每天 {daily_time}，汇总前一天；各节点分段', 'state': 'not_run', 'report_date': None}
     try:
         last = read_json(state / 'last-run.json', 65536)
         summary['report_date'] = date.fromisoformat(last['report_date']).isoformat()
         summary['updated_at'] = timestamp(last['updated_at'])
-        if last.get('emailed'):
+        if last.get('run_state') == 'running':
+            age = (datetime.now(report.timezone_for(report.REPORT_TIMEZONE)) - datetime.fromisoformat(last['updated_at'])).total_seconds()
+            summary['state'] = 'running' if age <= 600 else 'failed'
+        elif last.get('emailed'):
             summary['state'] = 'smtp_accepted'
         elif 'mail_exit_code' in last or last.get('generation_exit_code') != 0:
             summary['state'] = 'failed'
@@ -166,7 +169,7 @@ def mail_status(state):
     return summary
 
 
-def publish(now, build_current, state=STATE, output=OUTPUT, retention=MAX_DAYS):
+def publish(now, build_current, state=STATE, output=OUTPUT, retention=MAX_DAYS, daily_time='09:00'):
     """Keep last-good current view on failure; never rewrite private daily reports."""
     today = now.date()
     cutoff = cutoff_date(today, retention)
@@ -223,7 +226,7 @@ def publish(now, build_current, state=STATE, output=OUTPUT, retention=MAX_DAYS):
             history_failures += 1
     index = {'schema_version': 1, 'today': today.isoformat(), 'generated_at': now.isoformat(),
              'current_generation_ok': current_ok, 'history_failures': history_failures,
-             'refresh_seconds': 120, 'retention_days': days(retention), 'earliest_date': cutoff.isoformat(), 'mail': mail_status(state),
+             'refresh_seconds': 120, 'retention_days': days(retention), 'earliest_date': cutoff.isoformat(), 'mail': mail_status(state, daily_time),
              'dates': sorted(dates, key=lambda item: item['report_date'], reverse=True)}
     atomic_json(output / 'index.json', index)
     return current_ok
@@ -256,7 +259,8 @@ def main():
         except BlockingIOError:
             print('Audit publisher skipped: another audit job is running')
             return 0
-        success = publish(datetime.now(report.timezone_for(report.REPORT_TIMEZONE)), build_current, retention=retention)
+        import schedule_config
+        success = publish(datetime.now(report.timezone_for(report.REPORT_TIMEZONE)), build_current, retention=retention, daily_time=schedule_config.read()['time'])
     print('Audit view updated' if success else 'Audit view retained; current generation failed')
     return 0 if success else 1
 

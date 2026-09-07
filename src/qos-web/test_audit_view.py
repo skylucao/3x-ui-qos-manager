@@ -22,16 +22,16 @@ class CacheTests(unittest.TestCase):
     def test_expired_report_denied_and_stale_index_filtered(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            for day in ('2026-08-31', '2026-09-01', '2026-09-07', '2026-09-08'):
+            for day in ('2026-08-31', '2026-09-06', '2026-09-07', '2026-09-08'):
                 (root / (day + '.json')).write_text(json.dumps({'schema_version': 1, 'report_date': day}))
             for day in ('2026-08-31', '2026-09-08'):
                 with self.assertRaises(FileNotFoundError):
                     audit_view.read(day + '.json', root)
-            self.assertEqual(json.loads(audit_view.read('2026-09-01.json', root))['report_date'], '2026-09-01')
-            (root / 'index.json').write_text(json.dumps({'schema_version': 1, 'dates': [{'report_date': '2026-08-31'}, {'report_date': '2026-09-01'}]}))
+            self.assertEqual(json.loads(audit_view.read('2026-09-06.json', root))['report_date'], '2026-09-06')
+            (root / 'index.json').write_text(json.dumps({'schema_version': 1, 'dates': [{'report_date': '2026-08-31'}, {'report_date': '2026-09-06'}]}))
             index = json.loads(audit_view.read('index.json', root))
-            self.assertEqual(index['dates'], [{'report_date': '2026-09-01'}])
-            self.assertEqual(index['retention_days'], 7)
+            self.assertEqual(index['dates'], [{'report_date': '2026-09-06'}])
+            self.assertEqual(index['retention_days'], 2)
 
     def test_strict_dates(self):
         self.assertEqual(audit_view.requested_date('date=2026-09-07'), '2026-09-07')
@@ -110,7 +110,7 @@ class RouteTests(unittest.TestCase):
         return status, payload, returned
 
     def test_all_audit_routes_need_proxy_and_session(self):
-        for path in ('/audit', '/api/audit/index', '/api/audit/report?date=2026-09-07', '/api/notes'):
+        for path in ('/audit', '/settings', '/api/settings', '/api/audit/index', '/api/audit/report?date=2026-09-07', '/api/notes'):
             with self.subTest(path=path):
                 self.assertEqual(self.get(path, proxy=False, embed=True)[0], 403)
                 self.assertEqual(self.get(path)[0], 401)
@@ -140,14 +140,14 @@ class RouteTests(unittest.TestCase):
             self.assertEqual(status, 503)
             self.assertNotIn(b'private sensitive', payload)
 
-    def post_note(self, payload, authorized=True, origin='https://test.invalid', csrf=None):
+    def post_note(self, payload, authorized=True, origin='https://test.invalid', csrf=None, path='/api/notes'):
         headers = {'X-Qos-Proxy-Secret': 'test-proxy-secret', 'Content-Type': 'application/json', 'Origin': origin}
         if authorized:
             headers['X-Qos-Embed-Token'] = 'a' * 64
         if csrf is not False:
             headers['X-CSRF-Token'] = self.web.EMBED_CSRF if csrf is None else csrf
         conn = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=5)
-        conn.request('POST', '/api/notes', body=json.dumps(payload), headers=headers)
+        conn.request('POST', path, body=json.dumps(payload), headers=headers)
         response = conn.getresponse()
         result = response.status, json.loads(response.read())
         conn.close()
@@ -180,6 +180,32 @@ class RouteTests(unittest.TestCase):
                 status['nodes'] = []
                 self.assertEqual(self.post_note({**payload, 'expected_revision': 1})[0], 409)
                 self.assertTrue(all(call.args[0] == {'v': 1, 'op': 'nodes'} for call in control.call_args_list))
+
+    def test_settings_and_ptr_write_auth_validation(self):
+        for route, payload in [('/api/settings', {'section': 'mail', 'time': '12:34', 'expected_revision': 'a'*64}), ('/api/audit/ptr', {'date': '2026-09-07', 'ip': '8.8.8.8'})]:
+            with patch.object(self.web, 'control_request') as control, patch.object(self.web.ptr_lookup, 'lookup') as lookup:
+                self.assertEqual(self.post_note(payload, path=route, authorized=False)[0], 401)
+                self.assertEqual(self.post_note(payload, path=route, origin='https://evil.invalid')[0], 403)
+                self.assertEqual(self.post_note(payload, path=route, csrf=False)[0], 403)
+                self.assertEqual(self.post_note({**payload, 'unwanted': 1}, path=route)[0], 400)
+                control.assert_not_called(); lookup.assert_not_called()
+
+    def test_settings_controller_contract_and_ptr_expiry(self):
+        payload = {'section': 'mail', 'time': '12:34', 'expected_revision': 'a'*64}
+        with patch.object(self.web, 'control_request', return_value={'ok': True}) as control:
+            self.assertEqual(self.post_note(payload, path='/api/settings')[0], 200)
+            control.assert_called_once_with({**payload, 'v': 1, 'op': 'settings_set'})
+            control.return_value = {'ok': False, 'code': 'conflict', 'message': 'reload'}
+            self.assertEqual(self.post_note(payload, path='/api/settings')[0], 409)
+        with patch.object(self.web.ptr_lookup, 'lookup', side_effect=FileNotFoundError('expired')):
+            self.assertEqual(self.post_note({'date': '2026-09-07', 'ip': '8.8.8.8'}, path='/api/audit/ptr')[0], 404)
+
+    def test_settings_page_assets_and_no_tokens_left(self):
+        code, body, headers = self.get('/settings', embed=True)
+        self.assertEqual(code, 200)
+        self.assertNotIn(b'__CSRF_TOKEN__', body)
+        for name in ('settings.js', 'settings.css'):
+            self.assertEqual(self.get('/'+name, embed=True)[0], 200)
 
 
 if __name__ == '__main__':

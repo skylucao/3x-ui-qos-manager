@@ -163,6 +163,8 @@ xui_was_active=$(service_active x-ui.service)
 qos_was_enabled=$(service_enabled xray-qos.service)
 control_was_enabled=$(service_enabled xray-qos-control.service)
 web_was_enabled=$(service_enabled xray-qos-web.service)
+ptr_was_active=$(service_active xray-audit-ptr.socket)
+ptr_was_enabled=$(service_enabled xray-audit-ptr.socket)
 
 {
     printf 'WAN_INTERFACE=%q\n' "$XUI_QOS_WAN"
@@ -178,6 +180,8 @@ web_was_enabled=$(service_enabled xray-qos-web.service)
     printf 'QOS_WAS_ENABLED=%q\n' "$qos_was_enabled"
     printf 'CONTROL_WAS_ENABLED=%q\n' "$control_was_enabled"
     printf 'WEB_WAS_ENABLED=%q\n' "$web_was_enabled"
+    printf 'PTR_WAS_ACTIVE=%q\n' "$ptr_was_active"
+    printf 'PTR_WAS_ENABLED=%q\n' "$ptr_was_enabled"
 } >"$uninstall_backup/state.env"
 install -o root -g root -m 0700 /usr/local/sbin/xui-qos-rollback-install "$uninstall_backup/rollback.sh"
 
@@ -188,6 +192,10 @@ rollback_armed=yes
 backup_ready=yes
 
 systemctl stop xray-qos-web.service xray-qos-control.service
+if [[ -f /etc/systemd/system/xray-audit-ptr.socket ]]; then
+    systemctl stop xray-audit-ptr.socket
+    systemctl disable xray-audit-ptr.socket >/dev/null
+fi
 /usr/local/sbin/xray-qos cleanup
 systemctl stop xray-qos.service
 systemctl disable xray-qos-web.service xray-qos-control.service xray-qos.service >/dev/null
@@ -268,7 +276,10 @@ done
 nginx -t
 systemctl start nginx.service
 
-rm -rf -- /opt/xray-qos-web /etc/xray-qos-web /etc/xray-qos
+rm -rf -- /opt/xray-qos-web /etc/xray-qos-web
+# Independent audit continues running: never remove its selected sending time.
+rm -f -- /etc/xray-qos/nodes.json
+rmdir -- /etc/xray-qos 2>/dev/null || true
 rm -f -- /etc/default/xray-qos \
     /etc/systemd/system/xray-qos.service \
     /etc/systemd/system/xray-qos-control.service \

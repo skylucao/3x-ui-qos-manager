@@ -1,5 +1,5 @@
 [Unit]
-Description=Enforce seven-day audit retention and rotate private Xray logs
+Description=Enforce two-day audit retention and rotate private Xray logs
 After=x-ui.service
 
 [Service]
