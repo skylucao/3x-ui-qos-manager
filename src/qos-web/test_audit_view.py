@@ -222,6 +222,20 @@ class RouteTests(unittest.TestCase):
             self.assertEqual(self.post_note(payload, path='/api/audit/geo')[0], 404)
         self.assertEqual(self.get('/api/audit/geo?ip=8.8.8.8', embed=True)[0], 404)
 
+    def test_geo_node_batch_auth_and_contract(self):
+        payload = {'date': '2026-09-07', 'node_key': 'node:1'}
+        with patch.object(self.web.geo_lookup, 'lookup_node', return_value={'results': {}}) as lookup:
+            for options, expected in (({'authorized': False}, 401), ({'origin': 'https://evil.invalid'}, 403), ({'csrf': False}, 403)):
+                self.assertEqual(self.post_note(payload, path='/api/audit/geo', **options)[0], expected)
+            for body in ({**payload, 'ip': '8.8.8.8'}, {**payload, 'ips': ['8.8.8.8']}, {**payload, 'date': []}):
+                self.assertEqual(self.post_note(body, path='/api/audit/geo')[0], 400)
+            self.assertEqual(self.post_note(payload, path='/api/audit/ptr')[0], 400)
+            lookup.assert_not_called()
+            self.assertEqual(self.post_note(payload, path='/api/audit/geo')[0], 200)
+            lookup.assert_called_once_with('2026-09-07', 'node:1', audit_view.read)
+            lookup.side_effect = FileNotFoundError('expired node')
+            self.assertEqual(self.post_note(payload, path='/api/audit/geo')[0], 404)
+
 
 if __name__ == '__main__':
     unittest.main()

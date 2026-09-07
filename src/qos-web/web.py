@@ -564,11 +564,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             if path in (path_for('api/audit/ptr'), path_for('api/audit/geo')):
-                if set(payload) != {'date', 'ip'} or not isinstance(payload['date'], str):
+                batch = path == path_for('api/audit/geo') and set(payload) == {'date', 'node_key'}
+                if (not batch and set(payload) != {'date', 'ip'}) or not isinstance(payload['date'], str):
                     raise ValueError('invalid fields')
                 day = audit_view.requested_date('date=' + payload['date'])
-                lookup = geo_lookup.lookup if path == path_for('api/audit/geo') else ptr_lookup.lookup
-                result = {'ok': True, **lookup(day, payload['ip'], audit_view.read)}
+                if batch:
+                    result = {'ok': True, **geo_lookup.lookup_node(day, payload['node_key'], audit_view.read)}
+                else:
+                    lookup = geo_lookup.lookup if path == path_for('api/audit/geo') else ptr_lookup.lookup
+                    result = {'ok': True, **lookup(day, payload['ip'], audit_view.read)}
             else:
                 if set(payload) not in ({'section', 'expected_revision', 'link_mbps', 'reserved_mbps'}, {'section', 'expected_revision', 'time'}):
                     raise ValueError('invalid fields')

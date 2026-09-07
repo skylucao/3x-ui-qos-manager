@@ -34,7 +34,8 @@
 .audit-page th, .audit-page td { text-align: left; padding: 14px 10px; border-bottom: 1px solid #2b3e53; vertical-align: top; }
 .audit-page th { color: #bacde0; font-weight: 500; white-space: nowrap; }
 .audit-page td:first-child { overflow-wrap: anywhere; min-width: 160px; max-width: 320px; }
-.audit-page td:nth-child(5) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.audit-page td:nth-child(6) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.audit-geo-cell { min-width: 180px; max-width: 260px; overflow-wrap: anywhere; line-height: 1.6; }
 .audit-page td:last-child { min-width: 180px; max-width: 270px; line-height: 1.6; }
 .audit-service-meta, .audit-rule-link { display: block; margin-top: 6px; font-size: 14px; }
 .audit-service-meta { color: #adbed2; }

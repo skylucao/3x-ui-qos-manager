@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 import hashlib
 import ipaddress
+import json
 import os
 from pathlib import Path
 import re
@@ -9,7 +10,7 @@ import stat
 import threading
 
 from ip2region import searcher, util
-from ptr_lookup import observed_ip
+from ptr_lookup import observed_ip, public_ip
 
 UPSTREAM_COMMIT = 'cd40e3a1d532d645697999d646cf0e10481cef33'
 UPSTREAM_VERSION = 'v3.17.0'
@@ -23,6 +24,7 @@ DATASETS = {
 }
 LIMITATION = '这是连接目标 IP 的网络归属参考，不是员工所在地。CDN、云服务、Anycast 和资料滞后可能造成偏差，也不能据此判断访问了哪个网站。'
 SLOTS = threading.BoundedSemaphore(2)
+MAX_TARGETS = 100  # Same bound as the sanitized per-node web projection.
 
 
 def verify_database(path, version):
@@ -66,36 +68,90 @@ def fields(region):
     return dict(zip(('country', 'province', 'city', 'isp', 'country_code'), cleaned)) if any(cleaned) else None
 
 
-def locate(value):
-    """Only call after observed_ip authorization; never performs network I/O."""
-    ip = ipaddress.ip_address(value)
-    result = {'status': 'unavailable', 'location': None, 'database_date': None,
-              'provider': 'ip2region', 'dataset_version': UPSTREAM_VERSION,
-              'source_url': SOURCE_URL, 'limitation': LIMITATION}
+def empty_result(status='unavailable'):
+    return {'status': status, 'location': None, 'database_date': None,
+            'provider': 'ip2region', 'dataset_version': UPSTREAM_VERSION,
+            'source_url': SOURCE_URL, 'limitation': LIMITATION}
+
+
+def locate_many(values):
+    """One integrity check/reader per family per bounded, authorized batch."""
+    if not isinstance(values, list) or len(values) > MAX_TARGETS:
+        raise ValueError('invalid batch size')
+    ips = {value: ipaddress.ip_address(public_ip(value)) for value in values}
+    results = {value: empty_result() for value in ips}
+    if not ips:
+        return results
     if not SLOTS.acquire(blocking=False):
-        return {**result, 'status': 'busy'}
+        return {value: empty_result('busy') for value in ips}
     try:
-        path = DATA_DIR / DATASETS[ip.version]['name']
-        # Explicit clicks only, at most two concurrent checks. A stat/mtime cache
-        # can miss same-size in-place writes on coarse-resolution filesystems.
-        result['database_date'] = verify_database(path, ip.version)
-        # File-only readers are inexpensive and each request owns its file cursor.
-        engine = searcher.new_with_file_only(util.IPv4 if ip.version == 4 else util.IPv6, str(path))
-        try:
-            region = engine.search(ip.packed)
-        finally:
-            engine.close()
-        result['location'] = fields(region)
-        result['status'] = 'found' if result['location'] else 'not_found'
-    except FileNotFoundError:
-        result['status'] = 'not_installed'
-    except (OSError, ValueError, IndexError, OverflowError):
-        # Do not reveal filesystem paths or retain/log the requested IP.
-        result['status'] = 'unavailable'
+        for version in (4, 6):
+            selected = {value: ip for value, ip in ips.items() if ip.version == version}
+            if not selected:
+                continue
+            try:
+                path = DATA_DIR / DATASETS[version]['name']
+                # Never cache validation by mtime: same-size writes can evade it.
+                date = verify_database(path, version)
+                engine = searcher.new_with_file_only(util.IPv4 if version == 4 else util.IPv6, str(path))
+                try:
+                    for value, ip in selected.items():
+                        results[value]['database_date'] = date
+                        try:
+                            location = fields(engine.search(ip.packed))
+                            results[value].update(location=location, status='found' if location else 'not_found')
+                        except (OSError, ValueError, IndexError, OverflowError):
+                            results[value]['status'] = 'unavailable'
+                finally:
+                    engine.close()
+            except FileNotFoundError:
+                for value in selected:
+                    results[value]['status'] = 'not_installed'
+            except (OSError, ValueError, IndexError, OverflowError):
+                # No filesystem paths, persisted results, or requested-IP logs.
+                for value in selected:
+                    results[value]['status'] = 'unavailable'
     finally:
         SLOTS.release()
-    return result
+    return results
+
+
+def locate(value):
+    return locate_many([value])[value]
 
 
 def lookup(day, value, reader):
     return locate(observed_ip(day, value, reader))
+
+
+def lookup_node(day, key, reader):
+    if not isinstance(key, str) or not 1 <= len(key) <= 100:
+        raise ValueError('invalid node key')
+    # Every batch rechecks retention and exact membership BEFORE disk lookup.
+    report = json.loads(reader(day + '.json'))
+    if not isinstance(report, dict) or not isinstance(report.get('nodes'), list) or any(not isinstance(node, dict) for node in report['nodes']):
+        raise ValueError('invalid projected nodes')
+    node = next((node for node in report['nodes'] if node.get('key') == key), None)
+    if node is None:
+        raise FileNotFoundError('node not present in retained report')
+    targets = node.get('destinations', [])
+    if not isinstance(targets, list) or len(targets) > MAX_TARGETS:
+        raise ValueError('invalid projected node size')
+    results, public = {}, []
+    for target in targets:
+        if not isinstance(target, dict):
+            raise ValueError('invalid projected target')
+        # Domain-only observations are never resolved into invented historical IPs.
+        if target.get('kind') != 'ip':
+            continue
+        value = target.get('destination')
+        if not isinstance(value, str) or len(value) > 45:
+            raise ValueError('invalid projected IP')
+        try:
+            public_ip(value)
+        except ValueError:
+            results[value] = empty_result('not_public')
+        else:
+            public.append(value)
+    results.update(locate_many(public))
+    return {'report_date': day, 'node_key': key, 'results': results}

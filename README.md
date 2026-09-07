@@ -11,7 +11,7 @@
 - 可选网站连接审计：按日期和节点查看域名/IP、连接数、疑似服务和连接出现小时。
 - 审计记录与服务器日报最多保留 2 天；独立自动清理，超期网页查询被拒绝。
 - 已记录的公网 IP 可按需反查 PTR，并显示“可能的服务 / 基础设施”、低可信度提示和官方规则依据；无依据保留未知，不代表实际访问的网站。
-- IP 归属地：集成开源 ip2region，离线查询 IPv4/IPv6 的国家、地区、城市、网络运营商及数据库日期；不是员工位置。见 [数据来源与使用说明](docs/IP-GEO.md)。
+- IP 归属地自动显示：每条已记录 IP 旁直接显示国家、地区、城市、运营商及数据库日期，无需点击查询。按节点批量使用 ip2region 离线库；域名未记录 IP 时不补造历史地址。见 [数据来源与使用说明](docs/IP-GEO.md)。
 - 日报发送时间可在网页按北京时间设置；修改不立即补发，同日报告不重复发送。
 - 最多同时限速 32 个节点；所有节点仍会显示。
 - 保留 SSH、3x-ui 面板和订阅端口的管理带宽。
@@ -36,14 +36,14 @@
 线路带宽无法从虚拟网卡可靠判断，必须填写 VPS 套餐的实际 Mbps。下面示例是总线路 1000 Mbps、管理保留 50 Mbps：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/skylucao/3x-ui-qos-manager/v1.3.0/install.sh \
+curl -fsSL https://raw.githubusercontent.com/skylucao/3x-ui-qos-manager/v1.3.1/install.sh \
   | sudo bash -s -- --yes --link-mbps 1000 --reserve-mbps 50
 ```
 
 如果直接运行且不加 `--yes`，安装器会询问线路速度并展示变更计划：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/skylucao/3x-ui-qos-manager/v1.3.0/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/skylucao/3x-ui-qos-manager/v1.3.1/install.sh | sudo bash
 ```
 
 3x-ui 尚未安装时，会调用经过 SHA-256 校验的官方 `v3.7.0` 安装器，并固定安装 `v3.7.0`；它会生成随机账号、密码和访问路径。官方凭据保存在目标机的 `/etc/x-ui/install-result.env`。

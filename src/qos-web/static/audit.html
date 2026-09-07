@@ -58,9 +58,10 @@
               <label class="audit-search">筛选目标 / 服务 <input id="target-filter" type="search" maxlength="253" placeholder="域名、IP 或服务名称" autocomplete="off"></label></div>
             <p class="audit-muted">服务名称均为本地规则推测，不证明使用了对应 App、正在聊天或观看视频。连接出现小时不是连续使用时长。点击“反查 IP”可查看可能关联的服务 / 基础设施及依据；此低可信度参考不改变域名识别与统计，不能确定共享 IP 上的具体网站。</p>
             <p id="target-note" class="audit-muted"></p>
-            <p class="audit-muted">“IP 归属地”使用 ip2region 离线库，显示目标 IP 的国家 / 地区、城市和网络运营商参考；不会为此把 IP 发送给第三方。归属地不是员工位置，库中缺失或过时的信息无法保证准确。</p>
+            <p class="audit-muted">每条 IP 记录自动显示归属参考；来源为 <a href="https://github.com/lionsoul2014/ip2region" target="_blank" rel="noopener noreferrer">ip2region 离线库</a>，不发送 IP 给第三方。数据库日期不是访问日期，归属地不是员工位置。域名记录没有连接 IP 时不会补造；缺失或过时的资料无法保证准确。</p>
+            <p id="geo-status" class="audit-muted" role="status" aria-live="polite"></p>
             <div class="audit-table-scroll"><table>
-              <thead><tr><th scope="col">连接目标</th><th scope="col">疑似网站 / 服务</th><th scope="col">识别依据</th><th scope="col">记录次数</th><th scope="col">首次 / 最后</th><th scope="col">连接出现小时</th></tr></thead>
+              <thead><tr><th scope="col">连接目标 / IP</th><th scope="col">IP 归属地（参考）</th><th scope="col">疑似网站 / 服务</th><th scope="col">识别依据</th><th scope="col">记录次数</th><th scope="col">首次 / 最后</th><th scope="col">连接出现小时</th></tr></thead>
               <tbody id="target-rows"></tbody>
             </table></div>
             <p id="target-empty" class="audit-muted" hidden>没有匹配记录；这不等于无人访问。</p>

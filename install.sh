@@ -4,9 +4,9 @@ set -Eeuo pipefail
 umask 077
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-VERSION=1.3.0
+VERSION=1.3.1
 DEFAULT_REPOSITORY="skylucao/3x-ui-qos-manager"
-DEFAULT_RELEASE_REF="v1.3.0"
+DEFAULT_RELEASE_REF="v1.3.1"
 XUI_INSTALLER_REF="v3.7.0"
 XUI_INSTALLER_SHA256="a7f4fedcea3abe8987508d00f29834b8872e4e4e5059159eb19460d474b37cdc"
 

@@ -4,6 +4,8 @@
   const number = (n) => Number(n).toLocaleString('zh-CN');
   const clock = (v) => v ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(v)) : '未记录';
   let catalog = null, current = null, selectedKey = null, busy = false, signedOut = false;
+  const geoCache = new WeakMap();
+  let targetGeneration = 0;
   const el = (tag, text, className) => { const node = document.createElement(tag); node.textContent = text; if (className) node.className = className; return node; };
   function ptrReference(container, result) {
     const messages = { not_found: '未查到 PTR 记录', timeout: 'DNS 查询超时', unavailable: '反查服务暂不可用', busy: '查询繁忙，请稍后重试' };
@@ -26,18 +28,48 @@
     container.append(box);
   }
   function geoReference(container, result) {
-    const messages = { not_found: '数据库中没有可用归属信息', not_installed: 'IP 数据库尚未安装，请联系管理员', unavailable: 'IP 数据库暂不可用或校验失败', busy: '查询繁忙，请稍后重试' };
-    container.replaceChildren(el('strong', '目标 IP 归属地（参考）'));
+    const messages = { not_found: '未知归属地', not_installed: 'IP 数据库未安装', unavailable: '归属查询暂不可用', busy: '查询繁忙，稍后刷新', not_public: '非公网 IP，无公网归属地' };
+    container.replaceChildren();
     if (result.status === 'found' && result.location) {
       const value = result.location;
-      container.append(el('span', `国家 / 地区：${value.country || '未知'}${value.country_code ? ` (${value.country_code})` : ''}`, 'audit-service-meta'),
+      container.append(el('strong', value.country || '国家 / 地区未知'),
         el('span', `省 / 州：${value.province || '未知'} · 城市：${value.city || '未知'}`, 'audit-service-meta'),
         el('span', `网络运营商：${value.isp || '未知'}`, 'audit-service-meta'));
     } else container.append(el('span', messages[result.status] || '无法确定归属地', 'audit-service-meta'));
-    container.append(el('span', `离线数据：ip2region ${result.dataset_version || ''}${result.database_date ? ` · 数据库生成日期 ${result.database_date}（非查询日期）` : ''}`, 'audit-service-meta'),
-      el('span', '只反映连接目标 IP 的网络归属参考，不是员工所在地。CDN、云服务和资料滞后可能造成偏差。', 'audit-service-meta'));
-    const link = el('a', 'ip2region 开源项目 / 数据来源', 'audit-rule-link');
-    link.href = 'https://github.com/lionsoul2014/ip2region'; link.target = '_blank'; link.rel = 'noopener noreferrer'; container.append(link);
+    if (result.database_date) container.append(el('small', `数据库：${result.database_date}`, 'audit-service-meta'));
+  }
+  function automaticGeo(node, rows, generation) {
+    const report = current, day = report.report_date, key = selectedKey;
+    const visible = () => current === report && selectedKey === key && targetGeneration === generation;
+    if (!rows.length) { $('geo-status').textContent = '当前记录没有可查询的 IP；域名不会被解析成历史连接 IP。'; return; }
+    $('geo-status').textContent = '正在自动加载 IP 归属地…';
+    let promise = geoCache.get(node);
+    if (!promise) {
+      promise = (async () => {
+        const response = await fetch('api/audit/geo', { method: 'POST', credentials: 'same-origin', cache: 'no-store',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content },
+          body: JSON.stringify({ date: day, node_key: node.key }), signal: AbortSignal.timeout(15000) });
+        if (response.status === 401 || response.status === 403 || response.redirected) {
+          signedOut = true; current = null; $('report-content').hidden = true; $('node-list').replaceChildren(); $('target-rows').replaceChildren();
+          $('load-status').textContent = '登录已失效，请返回 3x-ui 重新登录后打开本页面。';
+          throw new Error('登录已失效');
+        }
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || '归属地查询暂不可用');
+        if (result.report_date !== day || result.node_key !== node.key || !result.results || typeof result.results !== 'object') throw new Error('归属结果与当前记录不匹配');
+        return result.results;
+      })();
+      geoCache.set(node, promise);
+    }
+    promise.then((results) => {
+      if (!visible()) return;
+      for (const [ip, cell] of rows) if (cell.isConnected) geoReference(cell, results[ip] || { status: 'not_found' });
+      $('geo-status').textContent = `已自动更新 ${rows.length} 条 IP 记录的归属状态；未知或不可用的结果保留说明。`;
+    }).catch((error) => {
+      if (!visible()) return;
+      for (const [, cell] of rows) if (cell.isConnected) cell.textContent = '归属地暂不可用';
+      $('geo-status').textContent = (error.name === 'TimeoutError' ? '归属地加载超时。' : error.message + '。') + '请刷新汇总重试，页面也会定期自动刷新。';
+    });
   }
   async function get(path) {
     const response = await fetch(path, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
@@ -74,6 +106,7 @@
     $('mail-status').textContent = `${value.schedule}。${states[value.state] || states.unknown}${value.report_date ? `（报告日期 ${value.report_date}）` : ''}。`;
   }
   function targets(node) {
+    const generation = ++targetGeneration, geoRows = [];
     const query = $('target-filter').value.trim().toLowerCase();
     const items = node.destinations.filter((item) => [item.destination, item.classification?.service, item.classification?.category].some((value) => value?.toLowerCase().includes(query)));
     $('target-rows').replaceChildren(...items.map((item) => {
@@ -93,6 +126,8 @@
       }
       const hours = item.hourly_connections ? item.hourly_connections.map((n, h) => n ? `${String(h).padStart(2, '0')}时（${number(n)}条）` : '').filter(Boolean).join('、') : '旧报告未记录，不能按首末时间补推';
       const target = el('td', item.destination + (item.kind === 'ip' ? '（IP）' : ''));
+      const geo = el('td', item.kind === 'ip' ? '正在加载归属地…' : '未记录连接 IP，无法查归属地', 'audit-geo-cell');
+      if (item.kind === 'ip') geoRows.push([item.destination, geo]);
       if (item.kind === 'ip') {
         const button = el('button', '反查 IP', 'ghost-button'); button.type = 'button';
         const reference = el('div', '按需查看 PTR 与可能服务参考', 'audit-service-meta');
@@ -113,31 +148,15 @@
             if (target.isConnected && current?.report_date === day && selectedKey === key) reference.textContent = error.name === 'TimeoutError' ? '查询超时，请稍后重试' : error.message;
           } finally { button.disabled = false; }
         });
-        const geoButton = el('button', 'IP 归属地', 'ghost-button'); geoButton.type = 'button';
-        const geoResult = el('div', '', 'audit-ptr-hint'); geoResult.hidden = true; geoResult.setAttribute('aria-live', 'polite');
-        geoButton.addEventListener('click', async () => {
-          geoButton.disabled = true; geoResult.hidden = false; geoResult.textContent = '正在查询本地 IP 数据库…';
-          try {
-            const response = await fetch('api/audit/geo', { method: 'POST', credentials: 'same-origin', cache: 'no-store',
-              headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content },
-              body: JSON.stringify({ date: day, ip: item.destination }), signal: AbortSignal.timeout(12000) });
-            if (response.status === 401 || response.status === 403 || response.redirected) throw new Error('请重新登录后查询');
-            const result = await response.json();
-            if (!response.ok) throw new Error(result.message || '查询暂不可用');
-            if (!target.isConnected || current?.report_date !== day || selectedKey !== key) return;
-            geoReference(geoResult, result);
-          } catch (error) {
-            if (target.isConnected && current?.report_date === day && selectedKey === key) geoResult.textContent = error.name === 'TimeoutError' ? '查询超时，请稍后重试' : error.message;
-          } finally { geoButton.disabled = false; }
-        });
-        const actions = el('div', '', 'audit-ip-actions'); actions.append(button, geoButton);
-        target.append(actions, reference, geoResult);
+        const actions = el('div', '', 'audit-ip-actions'); actions.append(button);
+        target.append(actions, reference);
       }
-      row.append(target, service, basis, el('td', number(item.connections)), el('td', `${clock(item.first_seen)} / ${clock(item.last_seen)}`), el('td', hours));
+      row.append(target, geo, service, basis, el('td', number(item.connections)), el('td', `${clock(item.first_seen)} / ${clock(item.last_seen)}`), el('td', hours));
       return row;
     }));
     $('target-empty').hidden = !!items.length;
     $('target-note').textContent = (node.omitted_destinations ? `按连接数展示前 ${node.destinations.length} 个目标，另 ${number(node.omitted_destinations)} 个未展开；筛选仅作用于已展示目标。` : '按连接次数排序；未匹配规则的目标保留未知。') + (current.ruleset_version ? ` 识别规则版本 ${current.ruleset_version}。` : '');
+    automaticGeo(node, geoRows, generation);
   }
   function detail() {
     if (!current) return;
@@ -195,7 +214,9 @@
       $('report-date').value = days.includes(selectedDate) ? selectedDate : catalog.today;
       // Never keep a previous date's data on screen if this date fails to load.
       current = null; $('report-content').hidden = true; warnings();
-      current = await get('api/audit/report?date=' + encodeURIComponent($('report-date').value));
+      const nextReport = await get('api/audit/report?date=' + encodeURIComponent($('report-date').value));
+      if (signedOut) return; // A concurrent automatic geo request may have lost authentication.
+      current = nextReport;
       render();
     } catch (error) {
       current = null; $('report-content').hidden = true; $('updated').textContent = '';

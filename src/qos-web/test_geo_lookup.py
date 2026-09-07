@@ -104,6 +104,46 @@ class GeoTests(unittest.TestCase):
         try: self.assertEqual(geo.lookup('2026-09-07', '8.8.8.8', self.reader)['status'], 'busy')
         finally: geo.SLOTS.release(); geo.SLOTS.release()
 
+    def test_node_batch_verifies_each_family_once_and_skips_domains(self):
+        self.reader.return_value = json.dumps({'nodes': [{'key': 'node:1', 'destinations': [
+            {'kind': 'ip', 'destination': '8.8.8.8'}, {'kind': 'ip', 'destination': '8.8.8.8'},
+            {'kind': 'ip', 'destination': '2001:4860:4860::8888'},
+            {'kind': 'ip', 'destination': '10.0.0.1'}, {'kind': 'domain', 'destination': 'example.test'}]}]})
+        with patch.object(geo, 'verify_database', wraps=geo.verify_database) as verify, patch.object(geo.searcher, 'new_with_file_only', wraps=geo.searcher.new_with_file_only) as factory, patch.object(socket, 'getaddrinfo', side_effect=AssertionError('DNS not allowed')):
+            result = geo.lookup_node('2026-09-07', 'node:1', self.reader)
+            self.assertEqual(verify.call_count, 2)
+            self.assertEqual(factory.call_count, 2)
+            self.assertEqual(result['report_date'], '2026-09-07')
+            self.assertEqual(result['node_key'], 'node:1')
+            self.assertEqual(len(result['results']), 3)
+            self.assertEqual(result['results']['10.0.0.1']['status'], 'not_public')
+            self.assertEqual(result['results']['8.8.8.8']['status'], 'found')
+            self.assertNotIn('example.test', result['results'])
+            geo.lookup_node('2026-09-07', 'node:1', self.reader)
+            self.assertEqual(verify.call_count, 4, 'each new batch must recheck actual bytes')
+
+    def test_node_batch_membership_retention_and_bounds_precede_lookup(self):
+        with patch.object(geo, 'locate_many') as locate:
+            for key in ('', 'a' * 101, [], None):
+                with self.assertRaises(ValueError): geo.lookup_node('2026-09-07', key, self.reader)
+            with self.assertRaises(FileNotFoundError): geo.lookup_node('2026-09-07', 'missing', self.reader)
+            self.reader.return_value = json.dumps({'nodes': [{'key': 'node:1', 'destinations': [{'kind': 'ip', 'destination': '8.8.8.8'}] * 101}]})
+            with self.assertRaises(ValueError): geo.lookup_node('2026-09-07', 'node:1', self.reader)
+            self.reader.side_effect = FileNotFoundError('expired')
+            with self.assertRaises(FileNotFoundError): geo.lookup_node('2026-09-07', 'node:1', self.reader)
+            locate.assert_not_called()
+        with self.assertRaises(ValueError): geo.locate_many(['8.8.8.8'] * 101)
+
+    def test_node_batch_empty_and_one_family_failure_are_isolated(self):
+        self.reader.return_value = json.dumps({'nodes': [{'key': 'node:1', 'destinations': []}]})
+        with patch.object(geo, 'verify_database') as verify:
+            self.assertEqual(geo.lookup_node('2026-09-07', 'node:1', self.reader)['results'], {})
+            verify.assert_not_called()
+        (self.directory / self.specs[6]['name']).unlink()
+        result = geo.locate_many(['8.8.8.8', '2001:4860:4860::8888'])
+        self.assertEqual(result['8.8.8.8']['status'], 'found')
+        self.assertEqual(result['2001:4860:4860::8888']['status'], 'not_installed')
+
     def test_installer_reuses_verified_files_without_network(self):
         with patch.object(install_ipdata, 'download') as download:
             install_ipdata.install(self.directory)

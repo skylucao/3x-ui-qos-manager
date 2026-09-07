@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1
+
+- Automatically show target-IP location references in every audit table IP row, without a lookup button; explicitly label domain-only and non-public-IP records.
+- One bounded, authenticated batch per report/node; recheck retention/membership and verify each used IP database once per batch, with no persisted enrichment or automatic DNS queries.
+- Reuse pending/results only for the current in-memory report; guard late node/date/filter responses and clear visible records on authentication failure.
+- Added batch resource/authorization tests and automatic table loading, filtering, unknown/error and stale-response regressions.
+
 ## 1.3.0
 
 - Integrated the upstream ip2region IPv4/IPv6 reader for offline target-IP country/region, city and ISP references, with dataset-date and location caveats.
