@@ -10,6 +10,7 @@ __pycache__/
 .DS_Store
 nodes.json
 *.db
+*.xdb
 *.sqlite
 *.sqlite3
 *.sqlite3-*

@@ -67,6 +67,19 @@ class ReleaseIntegrationTests(unittest.TestCase):
 
 
 class SettingsIntegrationTests(unittest.TestCase):
+    def test_ip_geo_reader_and_pinned_download_wired_before_mutations(self):
+        installer = (ROOT / 'install.sh').read_text(encoding='utf-8')
+        for name in ('geo_lookup.py', 'install_ipdata.py'):
+            self.assertIn('/opt/xray-qos-web/' + name, installer)
+        self.assertLess(installer.index('--destination "$temporary_root/ipdata"'), installer.index('installing the official stable channel'))
+        self.assertIn('/opt/xray-qos-web/ipdata/ip2region_v${family}.xdb', installer)
+        for name in ('__init__.py', 'searcher.py', 'util.py', 'LICENSE', 'LICENSE.upstream', 'NOTICE.md'):
+            self.assertTrue((ROOT / 'src/qos-web/ip2region' / name).is_file())
+        self.assertFalse(list(ROOT.rglob('*.xdb')))
+        unit = (ROOT / 'src/systemd/xray-qos-web.service').read_text(encoding='utf-8')
+        self.assertIn('IPAddressDeny=any', unit)
+        self.assertIn('MemoryMax=96M', unit)
+
     def test_schedule_preserved_on_uninstall_and_ptr_stopped(self):
         uninstall = (ROOT / 'scripts/uninstall.sh').read_text()
         self.assertNotIn('rm -rf -- /opt/xray-qos-web /etc/xray-qos-web /etc/xray-qos', uninstall)

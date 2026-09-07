@@ -137,8 +137,7 @@ def exchange(ip):
     return {'hostname': name, 'status': result['status']}
 
 
-def lookup(day, value, reader):
-    global LAST_QUERY
+def observed_ip(day, value, reader):
     ip = public_ip(value)
     # Authorize on every call BEFORE cache use; expired dates and removed targets fail closed.
     report = json.loads(reader(day + '.json'))
@@ -152,6 +151,12 @@ def lookup(day, value, reader):
                     pass
     if not observed:
         raise FileNotFoundError('target not present in retained report')
+    return ip
+
+
+def lookup(day, value, reader):
+    global LAST_QUERY
+    ip = observed_ip(day, value, reader)
     now = time.monotonic()
     with LOCK:
         expired = [key for key, entry in CACHE.items() if now - entry[0] >= 600]

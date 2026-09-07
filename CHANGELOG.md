@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0
+
+- Integrated the upstream ip2region IPv4/IPv6 reader for offline target-IP country/region, city and ISP references, with dataset-date and location caveats.
+- A separate authenticated, CSRF-protected on-demand action; retained-report membership is checked before every query. No outbound lookup API, user-location tracking or report/email enrichment.
+- Pinned upstream code and database commit/checksums; install-time bounded downloads before system changes, preserved license/provenance notices, no XDB redistribution in this repository.
+- File-backed request-local readers preserve the 96 MiB web-service memory limit and existing network sandbox. Added synthetic XDB, authorization, installer and UI regression tests.
+
 ## 1.2.1
 
 - Optional PTR name reference hints in the existing audit table: possible infrastructure/service, common uses, low-confidence warning and official provenance.

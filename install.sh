@@ -4,9 +4,9 @@ set -Eeuo pipefail
 umask 077
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-VERSION=1.2.1
+VERSION=1.3.0
 DEFAULT_REPOSITORY="skylucao/3x-ui-qos-manager"
-DEFAULT_RELEASE_REF="v1.2.1"
+DEFAULT_RELEASE_REF="v1.3.0"
 XUI_INSTALLER_REF="v3.7.0"
 XUI_INSTALLER_SHA256="a7f4fedcea3abe8987508d00f29834b8872e4e4e5059159eb19460d474b37cdc"
 
@@ -171,6 +171,14 @@ for required_file in \
     src/qos-web/node_notes.py \
     src/qos-web/schedule_config.py \
     src/qos-web/ptr_lookup.py \
+    src/qos-web/geo_lookup.py \
+    src/qos-web/install_ipdata.py \
+    src/qos-web/ip2region/__init__.py \
+    src/qos-web/ip2region/searcher.py \
+    src/qos-web/ip2region/util.py \
+    src/qos-web/ip2region/LICENSE \
+    src/qos-web/ip2region/LICENSE.upstream \
+    src/qos-web/ip2region/NOTICE.md \
     src/qos-web/healthcheck.py \
     src/qos-web/static/dashboard.html \
     src/qos-web/static/xui-qos-integration.js \
@@ -181,6 +189,15 @@ for required_file in \
     scripts/verify.sh; do
     [[ -f "$source_root/$required_file" ]] || die "release file missing: $required_file"
 done
+
+# Fetch and verify the public offline databases BEFORE changing 3x-ui or arming rollback.
+# This downloads whole, fixed upstream datasets, never employee/target IP lookups.
+if [[ "$dry_run" == no ]]; then
+    if [[ -z "$temporary_root" ]]; then
+        temporary_root=$(mktemp -d /tmp/xui-qos-source.XXXXXXXX)
+    fi
+    python3 -B "$source_root/src/qos-web/install_ipdata.py" --destination "$temporary_root/ipdata"
+fi
 
 if [[ ! -x /usr/local/x-ui/x-ui || ! -f /etc/systemd/system/x-ui.service ]]; then
     [[ "$dry_run" == no ]] || die "3x-ui is not installed; normal mode would install it"
@@ -570,6 +587,16 @@ install -o root -g root -m 0644 "$source_root/src/qos-web/audit_view.py" /opt/xr
 install -o root -g root -m 0644 "$source_root/src/qos-web/node_notes.py" /opt/xray-qos-web/node_notes.py
 install -o root -g root -m 0644 "$source_root/src/qos-web/schedule_config.py" /opt/xray-qos-web/schedule_config.py
 install -o root -g root -m 0644 "$source_root/src/qos-web/ptr_lookup.py" /opt/xray-qos-web/ptr_lookup.py
+install -o root -g root -m 0644 "$source_root/src/qos-web/geo_lookup.py" /opt/xray-qos-web/geo_lookup.py
+install -o root -g root -m 0644 "$source_root/src/qos-web/install_ipdata.py" /opt/xray-qos-web/install_ipdata.py
+[[ ! -L /opt/xray-qos-web/ip2region && ! -L /opt/xray-qos-web/ipdata ]] || die "IP lookup paths must not be symlinks"
+install -d -m 0755 -o root -g root /opt/xray-qos-web/ip2region /opt/xray-qos-web/ipdata
+for name in __init__.py searcher.py util.py LICENSE LICENSE.upstream NOTICE.md; do
+    install -o root -g root -m 0644 "$source_root/src/qos-web/ip2region/$name" "/opt/xray-qos-web/ip2region/$name"
+done
+for family in 4 6; do
+    install -o root -g root -m 0644 "$temporary_root/ipdata/ip2region_v${family}.xdb" "/opt/xray-qos-web/ipdata/ip2region_v${family}.xdb"
+done
 # Notes are independent application state: preserve them on upgrade/rollback.
 [[ ! -L /var/lib/xray-qos-web ]] || die "notes directory must not be a symlink"
 if [[ -e /var/lib/xray-qos-web ]]; then
@@ -756,6 +783,9 @@ chmod 0600 /etc/xray-qos-web/install-result.env
     /opt/xray-qos-web/node_notes.py \
     /opt/xray-qos-web/schedule_config.py \
     /opt/xray-qos-web/ptr_lookup.py \
+    /opt/xray-qos-web/geo_lookup.py \
+    /opt/xray-qos-web/install_ipdata.py \
+    /opt/xray-qos-web/ip2region/*.py \
     /opt/xray-qos-web/healthcheck.py
 nginx -t
 

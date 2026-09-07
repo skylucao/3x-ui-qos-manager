@@ -31,6 +31,8 @@
 
 ## 安装前提
 
+另可点击“IP 归属地”查询目标服务器 IP 的大致网络归属（国家 / 地区、城市、运营商）。此功能在 v1.3.0 基础组件中集成 [ip2region 离线库](IP-GEO.md)，与 PTR 分开查询；不把目标 IP 发给外部查询 API，不定位员工，不写入日报或邮件。
+
 当前附加组件支持 Debian/Ubuntu、systemd、原生 3x-ui SQLite 和 **Linux AMD64 Xray**，不是 ARM/Docker 通用安装器。
 
 1. 先安装本项目 v1.2.0 或更新版本，确保节点备注可保存。
@@ -42,11 +44,11 @@
 把示例地址替换成自己的收件邮箱，明确启用附加组件：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/skylucao/3x-ui-qos-manager/v1.2.1/scripts/install-audit.sh \
+curl -fsSL https://raw.githubusercontent.com/skylucao/3x-ui-qos-manager/v1.3.0/scripts/install-audit.sh \
   | sudo bash -s -- --acknowledge-notice --recipient owner@example.com
 ```
 
-也可下载/克隆 v1.2.1 后运行（参考提示需要先更新基础组件至 v1.2.1）：
+也可下载/克隆 v1.3.0 后运行（IP 归属地需要先更新基础组件至 v1.3.0）：
 
 ```bash
 sudo bash scripts/install-audit.sh --acknowledge-notice --recipient owner@example.com

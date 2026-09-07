@@ -39,7 +39,7 @@ jobs:
           shellcheck --severity=error install.sh scripts/*.sh
       - name: Python syntax
         run: |
-          python -m py_compile src/xray-qos src/qos-web/*.py src/xray-audit/*.py tests/*.py
+          python -m py_compile src/xray-qos src/qos-web/*.py src/qos-web/ip2region/*.py src/xray-audit/*.py tests/*.py
       - name: JavaScript syntax
         run: |
           for script in src/qos-web/static/*.js; do node --check "$script"; done

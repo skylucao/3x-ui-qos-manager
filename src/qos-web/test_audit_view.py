@@ -207,6 +207,21 @@ class RouteTests(unittest.TestCase):
         for name in ('settings.js', 'settings.css'):
             self.assertEqual(self.get('/'+name, embed=True)[0], 200)
 
+    def test_geo_auth_origin_fields_membership_and_no_store(self):
+        payload = {'date': '2026-09-07', 'ip': '8.8.8.8'}
+        with patch.object(self.web.geo_lookup, 'lookup', return_value={'status': 'not_found'}) as lookup:
+            for options, expected in (({'authorized': False}, 401), ({'origin': 'https://evil.invalid'}, 403), ({'csrf': False}, 403)):
+                self.assertEqual(self.post_note(payload, path='/api/audit/geo', **options)[0], expected)
+            self.assertEqual(self.post_note({**payload, 'url': 'http://example.test'}, path='/api/audit/geo')[0], 400)
+            self.assertEqual(self.post_note(payload, path='/api/audit/geo?ip=8.8.8.8')[0], 400)
+            lookup.assert_not_called()
+            code, result = self.post_note(payload, path='/api/audit/geo')
+            self.assertEqual(code, 200); self.assertTrue(result['ok'])
+            lookup.assert_called_once_with('2026-09-07', '8.8.8.8', audit_view.read)
+            lookup.side_effect = FileNotFoundError('expired')
+            self.assertEqual(self.post_note(payload, path='/api/audit/geo')[0], 404)
+        self.assertEqual(self.get('/api/audit/geo?ip=8.8.8.8', embed=True)[0], 404)
+
 
 if __name__ == '__main__':
     unittest.main()

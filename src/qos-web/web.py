@@ -28,6 +28,7 @@ from urllib.parse import urlsplit
 import audit_view
 import node_notes
 import ptr_lookup
+import geo_lookup
 
 
 BIND = os.environ.get("QOS_WEB_BIND", "127.0.0.1")
@@ -547,7 +548,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == path_for("api/notes"):
             self.handle_note()
             return
-        if path in (path_for('api/settings'), path_for('api/audit/ptr')):
+        if path in (path_for('api/settings'), path_for('api/audit/ptr'), path_for('api/audit/geo')):
             self.handle_extra(path)
             return
         self.send_error_json(HTTPStatus.NOT_FOUND, "页面不存在")
@@ -562,11 +563,12 @@ class Handler(BaseHTTPRequestHandler):
         if payload is None:
             return
         try:
-            if path == path_for('api/audit/ptr'):
+            if path in (path_for('api/audit/ptr'), path_for('api/audit/geo')):
                 if set(payload) != {'date', 'ip'} or not isinstance(payload['date'], str):
                     raise ValueError('invalid fields')
                 day = audit_view.requested_date('date=' + payload['date'])
-                result = {'ok': True, **ptr_lookup.lookup(day, payload['ip'], audit_view.read)}
+                lookup = geo_lookup.lookup if path == path_for('api/audit/geo') else ptr_lookup.lookup
+                result = {'ok': True, **lookup(day, payload['ip'], audit_view.read)}
             else:
                 if set(payload) not in ({'section', 'expected_revision', 'link_mbps', 'reserved_mbps'}, {'section', 'expected_revision', 'time'}):
                     raise ValueError('invalid fields')
